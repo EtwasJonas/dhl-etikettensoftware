@@ -1,0 +1,11 @@
+[Unit]
+Description=DHL Versandmarke – Watch-Ordner-Uberwachung
+Documentation=https://github.com/PLACEHOLDER/dhl-etiketten
+
+[Service]
+ExecStart=%h/.local/bin/dhl-label watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
