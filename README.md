@@ -26,7 +26,9 @@ manuelle Fallback-Auslösung (druckt die neueste passende PDF).
 1. Im DHL-Portal PDF erzeugen und herunterladen (landet im Watch-Ordner)
 2. Sekunden später druckt der Vretti nur die Versandmarke
 3. Die verarbeitete PDF wandert nach `<Watch-Ordner>/gedruckt/`
-   (verhindert Doppeldruck)
+   (verhindert Doppeldruck). Schlägt der Druck 3-mal fehl (z.B. Drucker
+   offline), landet die PDF in `<Watch-Ordner>/fehlgeschlagen/` und kann
+   manuell nachgedruckt werden: `dhl-label print DATEI.pdf`
 
 ## Befehle
 
@@ -73,7 +75,7 @@ use_ghostscript = false       # Fallback-Cropping
 [watch]
 mode = downloads              # downloads (mit Namensfilter) | custom (alle PDFs)
 dir = /home/USER/Downloads
-filename_pattern = versand|dhl
+filename_pattern = versand|dhl|paket 
 processed_dirname = gedruckt
 poll_seconds = 2.0
 process_existing = false

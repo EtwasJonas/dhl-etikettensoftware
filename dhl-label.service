@@ -1,6 +1,6 @@
 [Unit]
 Description=DHL Versandmarke – Watch-Ordner-Uberwachung
-Documentation=https://github.com/PLACEHOLDER/dhl-etiketten
+Documentation=https://github.com/EtwasJonas/dhl-etikettensoftware
 
 [Service]
 ExecStart=%h/.local/bin/dhl-label watch

@@ -17,6 +17,7 @@ Konfiguration: ~/.config/dhl-label/config.conf
 
 import argparse
 import configparser
+import copy
 import os
 import re
 import shlex
@@ -64,7 +65,7 @@ class Config:
         w = cp["watch"] if cp.has_section("watch") else configparser.SectionProxy(cp, "watch")
         self.watch_mode = w.get("mode", fallback="downloads").lower()  # downloads | custom
         self.watch_dir = Path(w.get("dir", fallback="~/Downloads")).expanduser()
-        self.filename_pattern = w.get("filename_pattern", fallback="versand|dhl")
+        self.filename_pattern = w.get("filename_pattern", fallback="versand|dhl|paket")
         self.processed_dirname = w.get("processed_dirname", fallback="gedruckt")
         self.poll_seconds = w.getfloat("poll_seconds", fallback=2.0)
         self.process_existing = w.getboolean("process_existing", fallback=False)
@@ -140,7 +141,7 @@ def crop_with_ghostscript(src, dst, cfg):
         "-dFIXEDMEDIA", "-dPDFFitPage",
         f"-dDEVICEWIDTHPOINTS={W:.2f}", f"-dDEVICEHEIGHTPOINTS={height:.2f}",
         "-c", f"<</PageOffset [0 {offset_y:.2f}]>> setpagedevice",
-        "-f", str(src), "-sOutputFile", str(dst),
+        "-sOutputFile", str(dst), "-f", str(src),
     ]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
@@ -148,8 +149,13 @@ def crop_with_ghostscript(src, dst, cfg):
     return dst, (0, y0, W, y1)
 
 
-def make_cropped(src, dst, cfg, force_gs=False):
-    """Erzeugt die gecroppte PDF (pypdf, optional Ghostscript-Fallback)."""
+def make_cropped(src, dst, cfg, force_gs=False, **overrides):
+    """Erzeugt die gecroppte PDF (pypdf, optional Ghostscript-Fallback).
+    overrides: temporäre Config-Überschreibungen, z.B. trim_top_mm=5.0."""
+    if overrides:
+        cfg = copy.copy(cfg)
+        for key, value in overrides.items():
+            setattr(cfg, key, value)
     if cfg.use_ghostscript or force_gs:
         return crop_with_ghostscript(src, dst, cfg)
     return crop_pdf(src, dst, cfg)
@@ -223,11 +229,13 @@ def watch(cfg, process_existing=False):
         f"Filter: {repr(cfg.filename_pattern) if cfg.watch_mode == 'downloads' else 'alle PDFs'})")
 
     pending = {}
+    failures = {}
+    MAX_RETRIES = 3
     known = set()
     if not (process_existing or cfg.process_existing):
         known = {p for p in directory.glob("*.pdf") if matches(p, cfg)}
         if known:
-            log(f"Ãœberspringe {len(known)} bereits vorhandene PDF(s) "
+            log(f"Überspringe {len(known)} bereits vorhandene PDF(s) "
                 "(--process-existing zum Nachdrucken)")
 
     while True:
@@ -243,10 +251,11 @@ def watch(cfg, process_existing=False):
             if size == 0:
                 continue
             if pending.get(pdf) == size:
-                # GrÃ¶ÃŸe stabil â†’ Download abgeschlossen
+                # Größe stabil → Download abgeschlossen
                 pending.pop(pdf, None)
                 log(f"Neue PDF erkannt: {pdf.name}")
                 if print_label(pdf, cfg):
+                    failures.pop(pdf, None)
                     processed_dir.mkdir(exist_ok=True)
                     target = processed_dir / pdf.name
                     try:
@@ -254,11 +263,30 @@ def watch(cfg, process_existing=False):
                         log(f"Verschoben nach {target}")
                     except OSError as exc:
                         log(f"Konnte nicht verschieben: {exc}")
-                # bei Druckfehler: Datei bleibt liegen, nÃ¤chster Loop versucht erneut
+                else:
+                    # Druckfehler (z.B. Drucker offline): begrenzt wiederholen,
+                    # danach in fehlgeschlagen/ ablegen, damit der Loop nicht endlos spammt
+                    attempts = failures.get(pdf, 0) + 1
+                    failures[pdf] = attempts
+                    if attempts >= MAX_RETRIES:
+                        failed_dir = directory / "fehlgeschlagen"
+                        failed_dir.mkdir(exist_ok=True)
+                        try:
+                            pdf.replace(failed_dir / pdf.name)
+                            log(f"{pdf.name}: nach {attempts} Fehlversuchen nach "
+                                "fehlgeschlagen/ verschoben – manuell nachdrucken "
+                                "mit: dhl-label print")
+                            failures.pop(pdf, None)
+                        except OSError as exc:
+                            log(f"Konnte nicht verschieben: {exc}")
+                    else:
+                        log(f"Druck fehlgeschlagen (Versuch {attempts}/{MAX_RETRIES}), "
+                            "wird erneut versucht")
             else:
                 pending[pdf] = size
-        # Stale-EintrÃ¤ge rÃ¤umen (Datei zwischendurch gelÃ¶scht)
+        # Stale-Einträge räumen (Datei zwischendurch gelöscht)
         pending = {p: s for p, s in pending.items() if p.exists()}
+        failures = {p: n for p, n in failures.items() if p.exists()}
         time.sleep(cfg.poll_seconds)
 
 

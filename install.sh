@@ -40,8 +40,14 @@ else
   echo "Welchen Drucker soll die Versandmarke nutzen?"
   i=1
   for p in "${PRINTERS[@]}"; do echo "  $i) $p"; i=$((i+1)); done
-  read -r -p "Nummer [1]: " SEL
-  SEL="${SEL:-1}"
+  while true; do
+    read -r -p "Nummer [1]: " SEL
+    SEL="${SEL:-1}"
+    if [[ "$SEL" =~ ^[0-9]+$ ]] && [ "$SEL" -ge 1 ] && [ "$SEL" -le "${#PRINTERS[@]}" ]; then
+      break
+    fi
+    echo "Ungültige Eingabe, bitte Zahl 1-${#PRINTERS[@]} eingeben."
+  done
   PRINTER="${PRINTERS[$((SEL-1))]}"
 fi
 
@@ -59,14 +65,14 @@ info "Gewählt: Drucker='$PRINTER' Medium='$MEDIA'"
 # ---------------------------------------------------------------- Watch-Modus wählen
 echo ""
 echo "Wie sollen PDFs erkannt werden?"
-echo "  1) Downloads-Ordner überwachen – druckt nur PDFs mit Namensfilter (z.B. 'versand', 'dhl')"
+echo "  1) Downloads-Ordner überwachen – druckt nur PDFs mit Namensfilter (z.B. 'versand', 'dhl', 'paket')"
 echo "  2) Eigener Watch-Ordner – alle neuen PDFs dort werden gedruckt"
 read -r -p "Auswahl [1]: " WMODE
 WMODE="${WMODE:-1}"
 
 WATCH_MODE="downloads"
 WATCH_DIR="$HOME/Downloads"
-FILENAME_PATTERN="versand|dhl"
+FILENAME_PATTERN="versand|dhl|paket"
 if [ "$WMODE" = "2" ]; then
   WATCH_MODE="custom"
   read -r -p "Pfad des Watch-Ordners [$HOME/DHL]: " WATCH_DIR
