@@ -39,7 +39,22 @@ dhl-label print-latest       # Neueste passende PDF drucken (Desktop-Icon)
 dhl-label crop IN [OUT]      # Nur croppen, als Vorschau-PDF speichern
 dhl-label calibrate [PDF]    # Kalibrierungsdrucke erzeugen
 dhl-label show-config        # Effektive Konfiguration anzeigen
+dhl-label printers           # CUPS-Drucker (USB/WLAN) mit Verbindungsart auflisten
 ```
+
+## Druckerwahl (USB oder WLAN)
+
+Der Installer listet bei der Einrichtung **alle** in CUPS eingerichteten
+Drucker auf – unabhängig davon, ob sie per USB oder WLAN/Netzwerk
+verbunden sind (`lpstat -p` inkl. Status, z.B. „idle" oder „disabled").
+Der gewählte Druckername wird in der Konfiguration gespeichert; der
+Druck selbst läuft über `lp -d <Name>` und CUPS kümmert sich um den
+Transport. Ein WLAN-Drucker verhält sich also exakt wie ein USB-Drucker.
+
+Später prüfen: `dhl-label printers` zeigt jeden Drucker samt Geräte-URI
+(`usb://…` = USB, `ipp://…`/`socket://…`/`dnssd://…` = WLAN/Netzwerk).
+Ändern: Druckername in `~/.config/dhl-label/config.conf` unter `[printer]`
+tauschen, danach `systemctl --user restart dhl-label`.
 
 ## Kalibrierung
 

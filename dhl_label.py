@@ -357,6 +357,24 @@ def cmd_show_config(args, cfg):
     log(cfg)
 
 
+def cmd_printers(args, cfg):
+    """Listet alle CUPS-Drucker (USB und WLAN/Netzwerk) mit Gerätetyp auf."""
+    def run(cmd):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            return proc.stdout.strip()
+        except OSError as exc:
+            raise SystemExit(f"{cmd[0]} nicht gefunden: {exc}")
+
+    log("Drucker (Status):")
+    log(run(["lpstat", "-p"]) or "(keine Drucker eingerichtet)")
+    log("\nGeräte (Verbindungsart: usb:// = USB, ipp://|socket://|dnssd:// = WLAN/Netzwerk):")
+    log(run(["lpstat", "-v"]) or "(keine Geräte)")
+    log("\nStandarddrucker:")
+    log(run(["lpstat", "-d"]))
+    log("\nTipp: Drucker/Medium ändern in ~/.config/dhl-label/config.conf → [printer]")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="dhl-label",
@@ -364,7 +382,7 @@ def main():
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    w = sub.add_parser("watch", help="Watch-Ordner Ã¼berwachen")
+    w = sub.add_parser("watch", help="Watch-Ordner überwachen")
     w.add_argument("--process-existing", action="store_true",
                    help="Beim Start auch bereits vorhandene PDFs drucken")
     w.set_defaults(func=cmd_watch)
@@ -391,7 +409,13 @@ def main():
     sc = sub.add_parser("show-config", help="Konfiguration anzeigen")
     sc.set_defaults(func=cmd_show_config)
 
+    pd = sub.add_parser("printers", help="CUPS-Drucker (USB/WLAN) auflisten")
+    pd.set_defaults(func=cmd_printers)
+
     args = parser.parse_args()
+    if args.command == "printers":
+        args.func(args, None)  # funktioniert auch ohne config.conf
+        return
     cfg = Config()
     args.func(args, cfg)
 

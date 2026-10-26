@@ -28,18 +28,22 @@ $SUDO apt-get update -qq
 $SUDO apt-get install -y -qq python3-venv python3-pip cups-client
 
 # ---------------------------------------------------------------- Drucker wählen
-info "Verfügbare Drucker:"
-lpstat -p 2>/dev/null || die "Keine Drucker gefunden – ist der Vretti per USB verbunden und in CUPS eingerichtet?"
+info "Verfügbare Drucker (USB und WLAN/Netzwerk):"
+lpstat -p 2>/dev/null || die "Keine Drucker gefunden – ist der Vretti (USB oder WLAN) mit dem PC verbunden und in CUPS eingerichtet?"
 mapfile -t PRINTERS < <(lpstat -p 2>/dev/null | awk '{print $2}')
+mapfile -t PRINTER_STATE < <(lpstat -p 2>/dev/null | awk '{$1="";$2="";print;sub(/^ +/,"")}')
 [ "${#PRINTERS[@]}" -ge 1 ] || die "Keine Drucker in CUPS gefunden."
 
 if [ "${#PRINTERS[@]}" -eq 1 ]; then
   PRINTER="${PRINTERS[0]}"
-  info "Drucker automatisch gewählt: $PRINTER"
+  info "Drucker automatisch gewählt: $PRINTER (${PRINTER_STATE[0]})"
 else
-  echo "Welchen Drucker soll die Versandmarke nutzen?"
+  echo "Welchen Drucker soll die Versandmarke nutzen? (USB oder WLAN)"
   i=1
-  for p in "${PRINTERS[@]}"; do echo "  $i) $p"; i=$((i+1)); done
+  for p in "${PRINTERS[@]}"; do
+    echo "  $i) $p  –  ${PRINTER_STATE[$((i-1))]}"
+    i=$((i+1))
+  done
   while true; do
     read -r -p "Nummer [1]: " SEL
     SEL="${SEL:-1}"
@@ -50,6 +54,15 @@ else
   done
   PRINTER="${PRINTERS[$((SEL-1))]}"
 fi
+
+# Status prüfen (funktioniert für USB- und WLAN-Drucker gleich)
+PSTATE="$(lpstat -p "$PRINTER" 2>/dev/null || true)"
+case "$PSTATE" in
+  *disabled*|*deaktiviert*|*"nicht bereit"*)
+    warn "Drucker '$PRINTER' ist deaktiviert/nicht bereit: $PSTATE"
+    warn "Aktivieren mit:  cupsenable '$PRINTER'   (oder Systemeinstellungen › Drucker)"
+    ;;
+esac
 
 # ---------------------------------------------------------------- Mediengröße wählen
 info "Verfügbare Mediengrößen für '$PRINTER':"
