@@ -65,15 +65,31 @@ case "$PSTATE" in
 esac
 
 # ---------------------------------------------------------------- Mediengröße wählen
+echo ""
+echo "Erklärung: Die 'Mediengröße' ist der interne Name, unter dem CUPS"
+echo "(das Drucksystem) die Papier-/Etikettengröße kennt – z.B. '4x6',"
+echo "'100x150mm' oder 'A4'. Beim Drucken wird sie automatisch mitgegeben."
+echo "Der Standard-Vorschlag entspricht bereits dem, was der Drucker meldet."
 info "Verfügbare Mediengrößen für '$PRINTER':"
 MEDIA_LIST="$(lpoptions -p "$PRINTER" -l 2>/dev/null | grep -iE 'pagesize|^media' | head -n1 || true)"
 [ -n "$MEDIA_LIST" ] || die "Konnte Mediengrößen nicht lesen (lpoptions)."
 echo "  $MEDIA_LIST"
 DEFAULT_MEDIA="$(echo "$MEDIA_LIST" | sed 's/.*://' | tr ' ' '\n' | grep '^\*' | tr -d '*' | head -n1 || true)"
 DEFAULT_MEDIA="${DEFAULT_MEDIA:-4x6}"
-read -r -p "Mediengröße eingeben [$DEFAULT_MEDIA]: " MEDIA
+read -r -p "Mediengröße übernehmen (Enter) oder anderen Namen eingeben [$DEFAULT_MEDIA]: " MEDIA
 MEDIA="${MEDIA:-$DEFAULT_MEDIA}"
 info "Gewählt: Drucker='$PRINTER' Medium='$MEDIA'"
+
+# ---------------------------------------------------------------- Etikettengröße
+echo ""
+echo "Erklärung: Zusätzlich wird das gecroppte A4-Stück exakt auf die"
+echo "Etikettengröße der Rolle eingepasst (gedreht + skaliert, zentriert)."
+echo "Das sorgt dafür, dass die Marke das komplette Etikett füllt."
+echo "Der Vretti nutzt meist 100x150-mm-Rollen (synonym mit 4\"x6\")."
+read -r -p "Etikettengröße der Rolle in mm (Breite x Höhe) [100x150]: " TARGET
+TARGET="${TARGET:-100x150}"
+if [ "$TARGET" = "-" ]; then TARGET=""; fi
+info "Ziel-Etikettengröße: ${TARGET:-(nur croppen, Drucker skaliert selbst)}"
 
 # ---------------------------------------------------------------- Watch-Modus wählen
 echo ""
@@ -133,6 +149,8 @@ trim_top_mm = 0.0
 trim_bottom_mm = 0.0
 page_index = 0
 use_ghostscript = false
+target_size_mm = $TARGET
+rotate = auto
 
 [watch]
 mode = $WATCH_MODE

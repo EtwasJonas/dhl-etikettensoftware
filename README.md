@@ -24,8 +24,13 @@ bash install.sh
 Ausführungsrechte zu setzen.)
 
 Der Installer fragt interaktiv ab:
-- Drucker (via `lpstat`) und Mediengröße (via `lpoptions`)
-- Watch-Modus: **Downloads-Ordner mit Namensfilter** (`versand|dhl`)
+- Drucker (via `lpstat`) – USB und WLAN gleichberechtigt
+- **Mediengröße** (via `lpoptions`): interner CUPS-Name der Etiketten-/Papiergröße
+  (z.B. `4x6`); der Vorschlag ist bereits das, was der Drucker meldet –
+  einfach mit Enter übernehmen
+- **Etikettengröße der Rolle** (z.B. `100x150`): das gecroppte A4-Stück wird
+  auf diese Größe gedreht und exakt eingepasst
+- Watch-Modus: **Downloads-Ordner mit Namensfilter** (`versand|dhl|paket`)
   oder **eigener Watch-Ordner** (alle PDFs)
 - Position der Marke im A4-PDF (obere/untere Hälfte)
 - Ob direkt ein Kalibrierungsdruck gestartet werden soll
@@ -71,17 +76,31 @@ tauschen, danach `systemctl --user restart dhl-label`.
 
 ## Kalibrierung
 
-`dhl-label calibrate` druckt nacheinander 4 Testvarianten (mit Bestätigung
-per Enter, jede Etikette beschriften):
+`dhl-label calibrate` schlägt nacheinander bis zu 6 Testvarianten vor –
+**jeder Testdruck passiert nur nach deiner Bestätigung** (Enter). Die
+Etikette danach beschriften, um die Variante zu identifizieren:
 
 1. Obere Hälfte exakt (pypdf)
 2. 5 mm oben abgeschnitten (`trim_top_mm = 5.0`)
 3. 5 mm unten abgeschnitten (`trim_bottom_mm = 5.0`)
 4. Ghostscript-Hardcrop (Fallback, falls pypdf-Ergebnis verschoben ist)
+5. Gedreht + exakt auf **100x150 mm** eingepasst
+6. Gedreht + exakt auf **101,6x152,4 mm** (4"×6") eingepasst
+
+**Warum Variante 5/6?** Die halbe A4-Seite (210 × 148,5 mm) hat ein
+anderes Seitenverhältnis als ein 4x6-Etikett (100 × 150 mm). Mit
+`target_size_mm` wird der markenbereich daher automatisch gedreht und
+proportional auf die Etikettengröße eingepasst – der Drucker bekommt ein
+PDF in exakter Etikettengröße und druckt ohne Rätselfrei randnah.
 
 Passt keine Variante: Werte in `~/.config/dhl-label/config.conf` unter
-`[crop]` anpassen (auch `trim_top_mm`/`trim_bottom_mm` in 1-mm-Schritten)
-und mit `dhl-label crop DATEI.pdf` eine Vorschau ohne Druck erzeugen.
+`[crop]` anpassen und mit `dhl-label crop DATEI.pdf` eine Vorschau-PDF
+ohne Druck erzeugen (öffnet sie z.B. mit einem PDF-Viewer zum Prüfen):
+
+- `trim_top_mm` / `trim_bottom_mm` – markenbereich eingrenzen (mm)
+- `target_size_mm` – z.B. `100x150`; leer = nur croppen
+- `rotate` – `auto` (Standard), `0`, `90`, `270` (falls die Marke
+  verkehrt herum auf dem Etikett landet)
 
 ## Konfiguration
 
@@ -99,6 +118,8 @@ trim_top_mm = 0.0
 trim_bottom_mm = 0.0
 page_index = 0                # 0 = erste Seite
 use_ghostscript = false       # Fallback-Cropping
+target_size_mm = 100x150      # exakte Etikettengroesse; leer = nur croppen
+rotate = auto                 # auto | 0 | 90 | 270
 
 [watch]
 mode = downloads              # downloads (mit Namensfilter) | custom (alle PDFs)

@@ -61,6 +61,8 @@ class Config:
         self.trim_bottom_mm = c.getfloat("trim_bottom_mm", fallback=0.0)
         self.page_index = c.getint("page_index", fallback=0)       # 0 = erste Seite
         self.use_ghostscript = c.getboolean("use_ghostscript", fallback=False)
+        self.target_mm = parse_size_mm(c.get("target_size_mm", fallback=""))
+        self.rotate = c.get("rotate", fallback="auto").lower()     # auto | 0 | 90 | 270
 
         w = cp["watch"] if cp.has_section("watch") else configparser.SectionProxy(cp, "watch")
         self.watch_mode = w.get("mode", fallback="downloads").lower()  # downloads | custom
@@ -71,13 +73,29 @@ class Config:
         self.process_existing = w.getboolean("process_existing", fallback=False)
 
     def __repr__(self):
+        target = f"{self.target_mm[0]:g}x{self.target_mm[1]:g}mm" if self.target_mm else "aus (nur croppen)"
         return (
             f"printer={self.printer!r} media={self.media!r} lp_extra={self.lp_extra!r}\n"
             f"crop: side={self.side} trim_top={self.trim_top_mm}mm "
             f"trim_bottom={self.trim_bottom_mm}mm page={self.page_index} gs={self.use_ghostscript}\n"
+            f"ziel: groesse={target} rotate={self.rotate}\n"
             f"watch: mode={self.watch_mode} dir={self.watch_dir} "
             f"pattern={self.filename_pattern!r} processed={self.processed_dirname!r}"
         )
+
+
+def parse_size_mm(text):
+    """Parst '100x150' (mm) zu (100.0, 150.0); leer/0 = None (nur croppen)."""
+    text = (text or "").strip().lower().replace(",", ".").replace("\u00d7", "x")
+    if not text or text in ("0", "none", "aus", "off"):
+        return None
+    m = re.match(r"^(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)$", text)
+    if not m:
+        raise SystemExit(
+            f"Ung\u00fcltige Zielgr\u00f6\u00dfe: {text!r} \u2013 erwartet z.B. '100x150' "
+            "(Breite x H\u00f6he in mm), oder leer, um nur zu croppen."
+        )
+    return (float(m.group(1)), float(m.group(2)))
 
 
 # ---------------------------------------------------------------- Cropping
@@ -149,13 +167,76 @@ def crop_with_ghostscript(src, dst, cfg):
     return dst, (0, y0, W, y1)
 
 
+def compose_target(src, dst, cfg, target_mm):
+    """Croppt, dreht (falls nötig) und passt exakt auf die Ziel-Etikettengröße
+    (z.B. 100x150 mm) ein: Inhalt proportional skaliert und zentriert.
+    Ergebnis ist ein PDF, das exakt der Etikettengröße entspricht."""
+    from pypdf import PdfReader, PdfWriter, Transformation  # lazy import
+    from pypdf.generic import RectangleObject
+
+    tw = target_mm[0] * MM_TO_PT
+    th = target_mm[1] * MM_TO_PT
+
+    reader = PdfReader(str(src))
+    writer = PdfWriter()
+    page = reader.pages[cfg.page_index]
+    region = _crop_region(page, cfg)
+    page.cropbox = RectangleObject([float(v) for v in region])
+    writer.add_page(page)
+    p = writer.pages[0]
+
+    l, b, r, t = region
+    w, h = r - l, t - b
+    # Inhalt auf den Seitenursprung schieben (Boxen manuell nachziehen)
+    p.add_transformation(Transformation().translate(-l, -b))
+    p.mediabox = RectangleObject([0, 0, w, h])
+    p.cropbox = RectangleObject([0, 0, w, h])
+
+    # Drehung: auto = drehen, wenn Crop-Region und Ziel unterschiedliche
+    # Orientierung haben (quer vs. hochkant)
+    angle = 0
+    if cfg.rotate == "auto":
+        if (w > h) != (tw > th):
+            angle = 90
+    elif cfg.rotate in ("90", "270"):
+        angle = int(cfg.rotate)
+    if angle:
+        p.rotation = angle
+        p.transfer_rotation_to_content()
+        box = p.mediabox
+        w, h = float(box.width), float(box.height)
+
+    # Proportional einpassen (kein Verzerren)
+    s = min(tw / w, th / h)
+    p.add_transformation(Transformation().scale(s, s))
+    p.mediabox = RectangleObject([0, 0, w * s, h * s])
+    p.cropbox = RectangleObject([0, 0, w * s, h * s])
+
+    # Zentrieren auf der Zielseite
+    tx = (tw - w * s) / 2.0
+    ty = (th - h * s) / 2.0
+    p.add_transformation(Transformation().translate(tx, ty))
+    p.mediabox = RectangleObject([0, 0, tw, th])
+    p.cropbox = RectangleObject([0, 0, tw, th])
+
+    with open(dst, "wb") as fh:
+        writer.write(fh)
+    return dst, (0.0, 0.0, tw, th)
+
+
 def make_cropped(src, dst, cfg, force_gs=False, **overrides):
-    """Erzeugt die gecroppte PDF (pypdf, optional Ghostscript-Fallback).
+    """Erzeugt die druckfertige PDF. Mit target_size_mm: exakt auf Etikettengröße
+    eingepasst; sonst nur croppen (pypdf, optional Ghostscript-Fallback).
     overrides: temporäre Config-Überschreibungen, z.B. trim_top_mm=5.0."""
     if overrides:
         cfg = copy.copy(cfg)
         for key, value in overrides.items():
             setattr(cfg, key, value)
+    target = getattr(cfg, "target_mm", None)
+    if target and not isinstance(target, (tuple, list)):
+        target = parse_size_mm(target)
+    if target:
+        return compose_target(src, dst, cfg, target)
     if cfg.use_ghostscript or force_gs:
         return crop_with_ghostscript(src, dst, cfg)
     return crop_pdf(src, dst, cfg)
@@ -313,17 +394,27 @@ def cmd_print_latest(args, cfg):
 def cmd_crop(args, cfg):
     dst = args.out if args.out else "cropped.pdf"
     _, region = make_cropped(args.datei, dst, cfg, force_gs=args.ghostscript)
-    l, b, r, t = region
-    log(f"Gecroppt nach {dst} (Region in pt: {l:.1f}, {b:.1f}, {r:.1f}, {t:.1f})")
+    if cfg.target_mm:
+        log(f"Druckfertige Etiketten-PDF erzeugt: {dst} "
+            f"({cfg.target_mm[0]:g} x {cfg.target_mm[1]:g} mm)")
+    else:
+        l, b, r, t = region
+        log(f"Gecroppt nach {dst} (Region in pt: {l:.1f}, {b:.1f}, {r:.1f}, {t:.1f})")
 
 
 def cmd_calibrate(args, cfg):
-    """Druckt nacheinander Testvarianten; der Nutzer beschriftet die Etikette."""
+    """Druckt nacheinander Testvarianten (jeder Druck wird vorher bestätigt);
+    der Nutzer beschriftet die Etiketten, um die beste Variante zu erkennen."""
+    base = dict() if not cfg.target_mm else dict()
     variants = [
-        ("Variante 1: obere HÃ¤lfte exakt (pypdf)", dict()),
+        ("Variante 1: obere Hälfte exakt (pypdf)", dict()),
         ("Variante 2: 5 mm oben abgeschnitten", dict(trim_top_mm=5.0)),
         ("Variante 3: 5 mm unten abgeschnitten", dict(trim_bottom_mm=5.0)),
-        ("Variante 4: Ghostscript-Hardcrop", dict(force_gs=True)),
+        ("Variante 4: Ghostscript-Hardcrop (ohne Zielgröße)", dict(force_gs=True)),
+        ("Variante 5: gedreht + exakt auf 100x150 mm eingepasst",
+         dict(target_mm="100x150", rotate="auto")),
+        ("Variante 6: gedreht + exakt auf 101,6x152,4 mm (4\"x6\") eingepasst",
+         dict(target_mm="101.6x152.4", rotate="auto")),
     ]
     tmp = Path(tempfile.gettempdir()) / "dhl-label-calibrate"
     tmp.mkdir(exist_ok=True)
@@ -335,21 +426,39 @@ def cmd_calibrate(args, cfg):
         raise SystemExit("Keine DHL-PDF gefunden. Aufruf: dhl-label calibrate PFAD/ZUR/PDF")
     src = Path(src)
 
-    log(f"Kalibrierung mit: {src.name}\n")
+    log(f"Kalibrierung mit: {src.name}")
+    log("Es werden bis zu 6 Testdrucke vorgeschlagen – jeder Druck passiert "
+        "nur nach deiner Bestätigung. Beschrifte jede Etikette, um die "
+        "Variante zu identifizieren.\n")
+    antwort = input("Testdrucke jetzt starten? (J/n): ")
+    if antwort.strip().lower() in ("n", "nein"):
+        log("Abgebrochen. Tipp: 'dhl-label crop DATEI.pdf' erzeugt eine "
+            "Vorschau-PDF ganz ohne Druck.")
+        return
     for i, (desc, kwargs) in enumerate(variants, 1):
         log(f"--- {desc} ---")
-        input("Enter zum Drucken, 's' + Enter zum Ãœberspringen: ")
+        eingabe = input("TESTDRUCK: Enter = drucken, s + Enter = überspringen, "
+                        "q + Enter = abbrechen: ").strip().lower()
+        if eingabe == "q":
+            log("Abgebrochen.")
+            break
+        if eingabe == "s":
+            log("Übersprungen.\n")
+            continue
         out = tmp / f"variante{i}.pdf"
         try:
             make_cropped(src, out, cfg, **kwargs)
         except Exception as exc:
-            log(f"Fehler bei {desc}: {exc}")
+            log(f"Fehler bei {desc}: {exc}\n")
             continue
         print_pdf(out, cfg)
         log("Etikette beschriften (Variante merken)!\n")
-    log("Fertig. Die beste Variante bestimmt die trims in der config.conf:")
-    log(f"  {CONFIG_PATH}  â†’  [crop] trim_top_mm / trim_bottom_mm")
-    log("Tipp: dhl-label crop DATEI erzeugt ohne Druck eine Vorschau-PDF.")
+    log("Fertig. Trage die Werte der besten Variante in die config.conf ein:")
+    log(f"  {CONFIG_PATH}")
+    log("  [crop] trim_top_mm / trim_bottom_mm  → Bereich eingrenzen")
+    log("  [crop] target_size_mm (z.B. 100x150) → exakte Etikettengröße")
+    log("  [crop] rotate (auto/90/270)          → falls die Marke verkehrt herum steht")
+    log("Tipp: 'dhl-label crop DATEI.pdf' erzeugt ohne Druck eine Vorschau-PDF.")
 
 
 def cmd_show_config(args, cfg):
