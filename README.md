@@ -6,9 +6,22 @@ Thermoetikettendrucker (z.B. Vretti 4x6, per USB/CUPS) – **ohne Druckdialog**.
 
 ## Installation (Ein-Klick auf dem Ziel-PC, Ubuntu/Debian/Mint)
 
-```bash
-./install.sh
+**Schritt 1 – Herunterladen** (im Browser, eingeloggt bei GitHub):
+
 ```
+https://github.com/EtwasJonas/dhl-etikettensoftware/archive/refs/heads/main.zip
+```
+
+**Schritt 2 – Entpacken** (Rechtsklick → „Hier entpacken")
+
+**Schritt 3 – Installieren** (Terminal im entpackten Ordner öffnen):
+
+```bash
+bash install.sh
+```
+
+(`bash install.sh` statt `./install.sh` – dann braucht man keine
+Ausführungsrechte zu setzen.)
 
 Der Installer fragt interaktiv ab:
 - Drucker (via `lpstat`) und Mediengröße (via `lpoptions`)
