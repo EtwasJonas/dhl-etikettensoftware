@@ -7,6 +7,7 @@ damit Parsing- und Befehls-Erzeugung separat getestet werden kann.
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
 MM_TO_PT = 72.0 / 25.4
 
@@ -135,7 +136,6 @@ def check_environment():
 def read_installed_config(path="~/.config/dhl-label/config.conf"):
     """Liest die installierte Konfiguration (für die GUI-Kalibrierung)."""
     import configparser
-    from pathlib import Path
     cp = configparser.ConfigParser()
     cp.read(str(Path(path).expanduser()), encoding="utf-8")
 
@@ -155,6 +155,18 @@ def read_installed_config(path="~/.config/dhl-label/config.conf"):
         "media": get("printer", "media"),
         "extra_options": get("printer", "extra_options"),
         "watch_dir": watch_dir,
+        "watch_mode": get("watch", "mode", default="downloads"),
+        "filename_pattern": get("watch", "filename_pattern", default=""),
         "target_size_mm": get("crop", "target_size_mm"),
         "side": get("crop", "side", default="top"),
     }
+
+
+def installed_state(path="~/.config/dhl-label/config.conf"):
+    """Ist die Software bereits installiert? → (installed, config | None).
+    Installiert = config.conf vorhanden UND Druckername eingetragen."""
+    p = Path(path).expanduser()
+    if not p.exists():
+        return False, None
+    cfg = read_installed_config(str(p))
+    return (bool(cfg.get("printer")), cfg)

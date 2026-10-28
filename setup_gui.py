@@ -39,6 +39,17 @@ INSTALL_SH = HERE / "install.sh"
 HOME = Path.home()
 
 
+def apply_window_icon(win):
+    """Setzt das DHL-Icon für ein Fenster (aus Repo- oder Installationsordner)."""
+    for icon_path in (HERE / "icon.png", APP_DIR / "icon.png"):
+        if icon_path.exists():
+            try:
+                win.set_icon_from_file(str(icon_path))
+            except Exception:
+                pass
+            return
+
+
 def ui(func, *args):
     """Führt func im GTK-Hauptthread aus (aus Worker-Threads aufrufen)."""
     GLib.idle_add(func, *args)
@@ -52,6 +63,9 @@ class SetupWindow(Gtk.Window):
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self.installing = False
+        self.installed_cfg = None
+        self._printer_names = []
+        apply_window_icon(self)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add(outer)
@@ -177,9 +191,41 @@ class SetupWindow(Gtk.Window):
         log_frame.add(scroll)
         outer.pack_start(log_frame, True, True, 4)
 
+        installed, cfg = gh.installed_state(CONFIG_FILE)
+        if installed:
+            self.installed_cfg = cfg
+            self.apply_installed_config()
+
         self.load_printers()
 
     # ------------------------------------------------------------- Helpers
+
+    def apply_installed_config(self):
+        """Software ist schon installiert: Banner zeigen, Button umbenennen,
+        Formular mit den aktuellen Werten vorbelegen."""
+        cfg = self.installed_cfg or {}
+        target = (cfg.get("target_size_mm") or "").strip()
+        self.target_entry.set_text(target if target else "100x150")
+        if (cfg.get("watch_mode") or "downloads") == "custom":
+            self.mode_custom.set_active(True)
+        else:
+            pattern = (cfg.get("filename_pattern") or "").strip()
+            if pattern:
+                self.pattern_entry.set_text(pattern)
+        if cfg.get("watch_dir"):
+            try:
+                self.folder_btn.set_current_folder(cfg["watch_dir"])
+            except Exception:
+                pass
+        if (cfg.get("side") or "top") == "bottom":
+            self.side_bottom.set_active(True)
+        self.install_btn.set_label("Einstellungen aktualisieren")
+        self.status_label.set_markup(
+            '<span foreground="green"><b>✓ Bereits installiert</b></span> – '
+            f"Drucker: <b>{cfg.get('printer')}</b> · Medium: <b>{cfg.get('media')}</b>\n"
+            "Einstellungen hier ändern und unten „Einstellungen aktualisieren“ klicken – "
+            "es wird nichts neu heruntergeladen, nur aktualisiert, und der Hintergrunddienst "
+            "startet direkt mit den neuen Werten.")
 
     def log(self, text):
         buf = self.log_view.get_buffer()
@@ -214,7 +260,12 @@ class SetupWindow(Gtk.Window):
             return
         for name, status in printers:
             self.printer_combo.append_text(f"{name} — {status}")
-        self.printer_combo.set_active(0)
+        self._printer_names = [name for name, _ in printers]
+        selected = 0
+        cfg = self.installed_cfg
+        if cfg and cfg.get("printer") in self._printer_names:
+            selected = self._printer_names.index(cfg["printer"])
+        self.printer_combo.set_active(selected)
 
     def on_printer_changed(self, combo):
         self.media_combo.remove_all()
@@ -232,6 +283,9 @@ class SetupWindow(Gtk.Window):
             self.media_combo.append_text(s)
             if s == default:
                 idx_default = i
+        cfg = self.installed_cfg
+        if cfg and cfg.get("media") in sizes:
+            idx_default = sizes.index(cfg["media"])
         self.media_combo.set_active(idx_default)
 
     def on_mode_changed(self, radio):
@@ -342,6 +396,7 @@ class CalibrationWindow(Gtk.Window):
 
     def __init__(self, parent):
         super().__init__(title="DHL-Kalibrierung")
+        apply_window_icon(self)
         self.set_transient_for(parent)
         self.set_modal(True)
         self.set_default_size(680, 520)

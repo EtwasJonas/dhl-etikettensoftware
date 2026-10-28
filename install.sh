@@ -220,6 +220,7 @@ cp "$SRC_DIR/dhl_label.py" "$APP_DIR/"
 cp "$SRC_DIR/gui_helpers.py" "$APP_DIR/"
 cp "$SRC_DIR/setup_gui.py" "$APP_DIR/"
 cp "$SRC_DIR/install.sh" "$APP_DIR/"   # damit dhl-label-setup (GUI) die GUI erneut ausführen kann
+cp "$SRC_DIR/icon.png" "$APP_DIR/"     # Fenster-Icon + Desktop-Verknüpfungen
 cp "$SRC_DIR/dhl-label.service" "$SYSTEMD_DIR/"
 
 info "Python-virtualenv anlegen und pypdf installieren…"
@@ -274,7 +275,7 @@ Type=Application
 Name=DHL-Marke drucken
 Comment=Druckt die neueste DHL-PDF als Versandmarke
 Exec=$BIN_DIR/dhl-label print-latest
-Icon=printer
+Icon=$APP_DIR/icon.png
 Terminal=false
 Categories=Utility;
 EOF
@@ -285,7 +286,7 @@ Type=Application
 Name=DHL-Setup
 Comment=Setup und Kalibrierung der DHL-Etikettensoftware
 Exec=$BIN_DIR/dhl-label-setup
-Icon=preferences-system
+Icon=$APP_DIR/icon.png
 Terminal=false
 Categories=Utility;
 EOF

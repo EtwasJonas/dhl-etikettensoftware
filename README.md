@@ -99,7 +99,13 @@ dhl-label printers           # CUPS-Drucker (USB/WLAN) mit Verbindungsart auflis
 ```
 
 Erneut einrichten (z.B. anderer Drucker): Desktop-Icon **„DHL-Setup“**
-oder `dhl-label-setup` im Terminal – das öffnet dieselbe GUI.
+oder `dhl-label-setup` im Terminal – die GUI zeigt dann
+**„✓ Bereits installiert“** mit den aktuellen Werten und den Knopf
+**„Einstellungen aktualisieren“** (vorausgewählt sind Drucker, Medium,
+Ordner usw.). Nach dem Klick übernimmt der Hintergrunddienst die neuen
+Einstellungen sofort – es wird nichts neu heruntergeladen. Beide
+Desktop-Verknüpfungen („DHL-Setup“ und „DHL-Marke drucken“) nutzen das
+DHL-Icon.
 
 ## Druckerwahl (USB oder WLAN)
 
