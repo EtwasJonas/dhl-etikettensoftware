@@ -220,6 +220,7 @@ cp "$SRC_DIR/dhl_label.py" "$APP_DIR/"
 cp "$SRC_DIR/gui_helpers.py" "$APP_DIR/"
 cp "$SRC_DIR/setup_gui.py" "$APP_DIR/"
 cp "$SRC_DIR/install.sh" "$APP_DIR/"   # damit dhl-label-setup (GUI) die GUI erneut ausführen kann
+cp "$SRC_DIR/uninstall.sh" "$APP_DIR/" # damit die GUI auch deinstallieren kann
 cp "$SRC_DIR/icon.png" "$APP_DIR/"     # Fenster-Icon + Desktop-Verknüpfungen
 cp "$SRC_DIR/dhl-label.service" "$SYSTEMD_DIR/"
 

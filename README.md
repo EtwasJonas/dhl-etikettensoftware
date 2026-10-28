@@ -194,6 +194,13 @@ Meldung lesen (meist fehlt `python3-gi`: `sudo apt install python3-gi`).
 
 ## Deinstallation
 
+**Per GUI (empfohlen):** „DHL-Setup“ öffnen → roter Knopf
+**„Deinstallieren…“** → Bestätigen. Es werden der Hintergrunddienst
+(Watcher), das Programm, die Einstellungen und die Desktop-Verknüpfungen
+entfernt; deine PDFs im Watch-Ordner bleiben erhalten.
+
+**Oder im Terminal:**
+
 ```bash
 ./uninstall.sh
 ```

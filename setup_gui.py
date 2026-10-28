@@ -63,6 +63,7 @@ class SetupWindow(Gtk.Window):
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self.installing = False
+        self.uninstalling = False
         self.installed_cfg = None
         self._printer_names = []
         apply_window_icon(self)
@@ -167,12 +168,21 @@ class SetupWindow(Gtk.Window):
         form.attach(self.side_bottom, 2, row, 1, 1)
         row += 1
 
-        # --- Install-Button ---
+        # --- Buttons: Installieren/Aktualisieren + Deinstallieren ---
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        outer.pack_start(btn_row, False, False, 6)
+
         self.install_btn = Gtk.Button(label="Installation starten")
         self.install_btn.get_style_context().add_class("suggested-action")
         self.install_btn.set_hexpand(True)
         self.install_btn.connect("clicked", self.on_install_clicked)
-        outer.pack_start(self.install_btn, False, False, 6)
+        btn_row.pack_start(self.install_btn, True, True, 0)
+
+        self.uninstall_btn = Gtk.Button(label="Deinstallieren…")
+        self.uninstall_btn.get_style_context().add_class("destructive-action")
+        self.uninstall_btn.connect("clicked", self.on_uninstall_clicked)
+        self.uninstall_btn.set_no_show_all(True)   # nur sichtbar, wenn installiert
+        btn_row.pack_start(self.uninstall_btn, False, False, 0)
 
         # --- Status/Log ---
         self.status_label = Gtk.Label(xalign=0)
@@ -191,14 +201,24 @@ class SetupWindow(Gtk.Window):
         log_frame.add(scroll)
         outer.pack_start(log_frame, True, True, 4)
 
-        installed, cfg = gh.installed_state(CONFIG_FILE)
-        if installed:
-            self.installed_cfg = cfg
-            self.apply_installed_config()
+        self.refresh_installed_state()
 
         self.load_printers()
 
     # ------------------------------------------------------------- Helpers
+
+    def refresh_installed_state(self):
+        """Installations-Zustand neu prüfen (Beim Start, nach Installation
+        und nach Deinstallation): Banner, Button-Text, Deinstall-Knopf."""
+        installed, cfg = gh.installed_state(CONFIG_FILE)
+        if installed:
+            self.installed_cfg = cfg
+            self.apply_installed_config()
+            self.uninstall_btn.show()
+        else:
+            self.installed_cfg = None
+            self.install_btn.set_label("Installation starten")
+            self.uninstall_btn.hide()
 
     def apply_installed_config(self):
         """Software ist schon installiert: Banner zeigen, Button umbenennen,
@@ -225,7 +245,8 @@ class SetupWindow(Gtk.Window):
             f"Drucker: <b>{cfg.get('printer')}</b> · Medium: <b>{cfg.get('media')}</b>\n"
             "Einstellungen hier ändern und unten „Einstellungen aktualisieren“ klicken – "
             "es wird nichts neu heruntergeladen, nur aktualisiert, und der Hintergrunddienst "
-            "startet direkt mit den neuen Werten.")
+            "startet direkt mit den neuen Werten. Zum Entfernen dient der rote Knopf "
+            "„Deinstallieren…“.")
 
     def log(self, text):
         buf = self.log_view.get_buffer()
@@ -362,11 +383,83 @@ class SetupWindow(Gtk.Window):
                 "Der Hintergrunddienst startet bei jeder Anmeldung selbst – "
                 "du musst nichts ein- oder ausschalten.")
             self.show_calibration_button()
+            self.refresh_installed_state()
         else:
             self.status_label.set_markup(
                 '<span foreground="red"><b>Installation fehlgeschlagen.</b></span> '
                 "Details im Verlauf oben. Den Knoten siehst du am Ende der Ausgabe.")
             self.install_btn.set_sensitive(True)
+
+    # ------------------------------------------------------------- Deinstallation
+
+    def _uninstall_script(self):
+        """Pfad zu uninstall.sh: erst neben der laufenden GUI suchen, dann im
+        Installationsordner."""
+        for path in (HERE / "uninstall.sh", APP_DIR / "uninstall.sh"):
+            if path.exists():
+                return path
+        return HERE / "uninstall.sh"  # Fallback – Fehler erscheint im Verlauf
+
+    def on_uninstall_clicked(self, btn):
+        if self.installing or self.uninstalling:
+            return
+        dlg = Gtk.MessageDialog(transient_for=self, flags=0,
+                                message_type=Gtk.MessageType.WARNING,
+                                buttons=Gtk.ButtonsType.YES_NO,
+                                text="DHL-Etikettensoftware wirklich deinstallieren?")
+        dlg.set_secondary_text(
+            "Entfernt werden:\n"
+            "• der Hintergrunddienst (der Watcher wird gestoppt)\n"
+            "• das Programm (~/.local/share/dhl-label)\n"
+            "• die Einstellungen (~/.config/dhl-label)\n"
+            "• die Desktop-Verknüpfungen\n\n"
+            "Deine PDFs bleiben erhalten – auch die Ordner „gedruckt“ und "
+            "„fehlgeschlagen“ im Watch-Ordner.\n"
+            "Danach druckt der PC nichts mehr automatisch.")
+        answer = dlg.run()
+        dlg.destroy()
+        if answer != Gtk.ResponseType.YES:
+            return
+
+        self.uninstalling = True
+        self.uninstall_btn.set_sensitive(False)
+        self.install_btn.set_sensitive(False)
+        self.status_label.set_markup("<b>Deinstallation läuft…</b>")
+
+        cmd = ["bash", str(self._uninstall_script())]
+        self.log(f"$ {' '.join(cmd)}\n")
+
+        def worker():
+            import subprocess
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                        stderr=subprocess.STDOUT, text=True,
+                                        bufsize=1, errors="replace")
+                for line in proc.stdout:
+                    ui(self.log, line)
+                proc.wait()
+                ui(self.on_uninstall_done, proc.returncode)
+            except Exception as exc:
+                ui(self.log, f"\nFehler: {exc}\n")
+                ui(self.on_uninstall_done, 1)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_uninstall_done(self, rc):
+        self.uninstalling = False
+        self.uninstall_btn.set_sensitive(True)
+        self.install_btn.set_sensitive(True)
+        self.refresh_installed_state()
+        if rc == 0:
+            self.status_label.set_markup(
+                '<span foreground="green"><b>✓ Deinstalliert.</b></span> '
+                "Hintergrunddienst, Programm und Einstellungen sind entfernt – "
+                "der PC druckt nichts mehr automatisch. Zum erneuten Einrichten "
+                "einfach „Installation starten“.")
+        else:
+            self.status_label.set_markup(
+                '<span foreground="red"><b>Deinstallation fehlgeschlagen.</b></span> '
+                "Details im Verlauf oben.")
 
     def show_calibration_button(self):
         if getattr(self, "calibrate_btn", None):
