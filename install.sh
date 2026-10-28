@@ -294,6 +294,11 @@ EOF
 info "systemd-User-Service aktivieren…"
 systemctl --user daemon-reload
 systemctl --user enable --now dhl-label.service
+# Beim ERNEUTEN Einrichten läuft der Dienst ggf. noch mit der alten config.conf
+# weiter (enable --now startet einen laufenden Dienst nicht neu) – ein Restart
+# übernimmt die frisch geschriebenen Werte. Auf einer frischen Installation ist
+# das harmlos (Dienst wurde gerade eben gestartet).
+systemctl --user restart dhl-label.service 2>/dev/null || true
 sleep 1
 if systemctl --user is-active --quiet dhl-label.service; then
   info "Watcher läuft."
