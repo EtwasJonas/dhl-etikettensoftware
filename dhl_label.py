@@ -161,7 +161,13 @@ def crop_with_ghostscript(src, dst, cfg):
         "-c", f"<</PageOffset [0 {offset_y:.2f}]>> setpagedevice",
         "-sOutputFile", str(dst), "-f", str(src),
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except FileNotFoundError:
+        raise RuntimeError(
+            "Ghostscript (gs) ist nicht installiert – Variante nicht nutzbar.\n"
+            "Installation:  sudo apt install ghostscript\n"
+            "(oder die Ghostscript-Variante überspringen)")
     if proc.returncode != 0:
         raise RuntimeError(f"Ghostscript fehlgeschlagen:\n{proc.stderr}")
     return dst, (0, y0, W, y1)
@@ -393,24 +399,37 @@ def cmd_print_latest(args, cfg):
 
 def cmd_crop(args, cfg):
     dst = args.out if args.out else "cropped.pdf"
-    _, region = make_cropped(args.datei, dst, cfg, force_gs=args.ghostscript)
-    if cfg.target_mm:
-        log(f"Druckfertige Etiketten-PDF erzeugt: {dst} "
-            f"({cfg.target_mm[0]:g} x {cfg.target_mm[1]:g} mm)")
+    overrides = {}
+    if args.target is not None:
+        overrides["target_mm"] = args.target          # "" = Zielgröße deaktivieren
+    if args.rotate is not None:
+        overrides["rotate"] = args.rotate
+    if args.trim_top is not None:
+        overrides["trim_top_mm"] = args.trim_top
+    if args.trim_bottom is not None:
+        overrides["trim_bottom_mm"] = args.trim_bottom
+    try:
+        _, region = make_cropped(args.datei, dst, cfg, force_gs=args.gs, **overrides)
+    except Exception as exc:
+        raise SystemExit(f"Crop fehlgeschlagen: {exc}")
+    l, b, r, t = region
+    target = overrides.get("target_mm", cfg.target_mm)
+    parsed = target if isinstance(target, (tuple, list)) else parse_size_mm(target)
+    if parsed:
+        log(f"Druckfertige Etiketten-PDF erzeugt: {dst} ({parsed[0]:g} x {parsed[1]:g} mm)")
     else:
-        l, b, r, t = region
         log(f"Gecroppt nach {dst} (Region in pt: {l:.1f}, {b:.1f}, {r:.1f}, {t:.1f})")
 
 
 def cmd_calibrate(args, cfg):
     """Druckt nacheinander Testvarianten (jeder Druck wird vorher bestätigt);
     der Nutzer beschriftet die Etiketten, um die beste Variante zu erkennen."""
-    base = dict() if not cfg.target_mm else dict()
     variants = [
         ("Variante 1: obere Hälfte exakt (pypdf)", dict()),
         ("Variante 2: 5 mm oben abgeschnitten", dict(trim_top_mm=5.0)),
         ("Variante 3: 5 mm unten abgeschnitten", dict(trim_bottom_mm=5.0)),
-        ("Variante 4: Ghostscript-Hardcrop (ohne Zielgröße)", dict(force_gs=True)),
+        ("Variante 4: Ghostscript-Hardcrop (ohne Zielgröße)",
+         dict(force_gs=True, target_mm="")),
         ("Variante 5: gedreht + exakt auf 100x150 mm eingepasst",
          dict(target_mm="100x150", rotate="auto")),
         ("Variante 6: gedreht + exakt auf 101,6x152,4 mm (4\"x6\") eingepasst",
@@ -466,6 +485,13 @@ def cmd_show_config(args, cfg):
     log(cfg)
 
 
+def cmd_print_pdf(args, cfg):
+    """Druckt eine bereits fertig aufbereitete (gecroppte/eingepasste) PDF
+    direkt via lp – ohne erneutes Croppen. Wird von der GUI-Kalibrierung genutzt."""
+    ok = print_pdf(args.datei, cfg)
+    sys.exit(0 if ok else 1)
+
+
 def cmd_printers(args, cfg):
     """Listet alle CUPS-Drucker (USB und WLAN/Netzwerk) mit Gerätetyp auf."""
     def run(cmd):
@@ -504,12 +530,23 @@ def main():
     pl.add_argument("ordner", nargs="?", default=None)
     pl.set_defaults(func=cmd_print_latest)
 
-    cr = sub.add_parser("crop", help="Nur croppen (Vorschau)")
+    cr = sub.add_parser("crop", help="Nur croppen (Vorschau) – ohne Druck")
     cr.add_argument("datei")
     cr.add_argument("out", nargs="?", default=None)
-    cr.add_argument("--ghostscript", action="store_true",
+    cr.add_argument("--gs", "--ghostscript", dest="gs", action="store_true",
                     help="Ghostscript-Hardcrop statt pypdf")
+    cr.add_argument("--target", default=None,
+                    help="Ziel-Etikettengröße mm, z.B. 100x150 ('' = deaktiviert)")
+    cr.add_argument("--rotate", default=None, help="auto | 0 | 90 | 270")
+    cr.add_argument("--trim-top", dest="trim_top", type=float, default=None,
+                    help="mm, oben abschneiden")
+    cr.add_argument("--trim-bottom", dest="trim_bottom", type=float, default=None,
+                    help="mm, unten abschneiden")
     cr.set_defaults(func=cmd_crop)
+
+    pp = sub.add_parser("print-pdf", help="Bereits fertig aufbereitete PDF drucken (ohne Crop)")
+    pp.add_argument("datei")
+    pp.set_defaults(func=cmd_print_pdf)
 
     ca = sub.add_parser("calibrate", help="Kalibrierungsdrucke erzeugen")
     ca.add_argument("datei", nargs="?", default=None)

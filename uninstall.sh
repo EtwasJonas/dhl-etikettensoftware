@@ -13,6 +13,7 @@ rm -f "$SYSTEMD_DIR/dhl-label.service"
 systemctl --user daemon-reload 2>/dev/null || true
 
 rm -rf "$APP_DIR" "$CONFIG_DIR"
-rm -f "$BIN_DIR/dhl-label" "$DESKTOP_DIR/dhl-label-print.desktop"
+rm -f "$BIN_DIR/dhl-label" "$BIN_DIR/dhl-label-setup" \
+      "$DESKTOP_DIR/dhl-label-print.desktop" "$DESKTOP_DIR/dhl-label-setup.desktop"
 
 echo "DHL-Etikettensoftware entfernt."
