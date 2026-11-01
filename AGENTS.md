@@ -27,7 +27,7 @@ systemd-User-Service = „PDF herunterladen → druckt automatisch“.
 5. **Kein BOM in Python-Dateien** – PowerShell `Set-Content -Encoding utf8` schreibt BOM → unter PS5.1 BOM-los schreiben (z.B. `[IO.File]::WriteAllText` mit `UTF8Encoding($false)`) oder edit-Tool nutzen.
 6. **LF für Shell-Dateien** – `.gitattributes` erzwingt `eol=lf`; niemals CRLF in install.sh/uninstall.sh committen.
 7. **pypdf lazy importieren** – `dhl_label.py` importiert pypdf erst in den Funktionen (CLI-Hilfe/`printers`/Parser müssen auch ohne pypdf laufen, z.B. auf Windows).
-8. **Repo bleibt privat** – GitHub: `EtwasJonas/dhl-etikettensoftware` (gh CLI ist installiert + authentifiziert).
+8. **Repo-Sichtbarkeit: öffentlich** – GitHub: `EtwasJonas/dhl-etikettensoftware` (gh CLI ist installiert + authentifiziert). Der Nutzer hat am 01.11.2026 explizit auf **public** umgestellt (zuvor privat). Sichtbarkeit NICHT ohne direkte Nutzeranweisung ändern.
 
 ## Entwicklungsumgebung (Windows-PC, Ziel ist Linux Mint)
 
@@ -50,7 +50,7 @@ systemctl --user status|restart|stop dhl-label
 journalctl --user -u dhl-label -f
 # Repo:
 git add -A && git commit -m "..." && git push
-gh repo view EtwasJonas/dhl-etikettensoftware --json isPrivate   # muss isPrivate:true bleiben
+gh repo view EtwasJonas/dhl-etikettensoftware --json isPrivate   # Sichtbarkeit pruefen (aktuell: public, nicht aendern)
 ```
 
 ## Minimale Sanity-Checks vor jedem Push

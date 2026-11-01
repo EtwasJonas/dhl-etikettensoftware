@@ -5,7 +5,8 @@
 
 ## Aktueller Stand: Code komplett, Wartet auf echten Test auf dem Mint-PC
 
-`origin/main` = `448830b` (lokal und GitHub synchron, Repo privat). Der GUI-Setup-
+`origin/main` = `429545c` (lokal und GitHub synchron, Repo **öffentlich** – Nutzer-
+Entscheidung vom 01.11.2026). Der GUI-Setup-
 Assistent ist fertig implementiert und Windows-seitig getestet:
 
 - `setup_gui.py`: GTK3-Formular → install.sh (nicht-interaktiv, pkexec-Passwortdialog)

@@ -18,7 +18,8 @@ Früher: manuelles PDF → Druckdialog mit falschen Einstellungen. Ziel:
 - **Testdrucke nur nach expliziter Bestätigung** (kein ungewollter Etikettenverbrauch).
 - Druck-freie Vorschau (`crop`-Befehl / GUI-Vorschau) ist gewollt und gut.
 - Alles auf **Deutsch**.
-- Repo auf GitHub **privat** (`EtwasJonas/dhl-etikettensoftware`).
+- Repo auf GitHub **öffentlich** (`EtwasJonas/dhl-etikettensoftware`) – am
+  01.11.2026 auf public umgestellt; Sichtbarkeit nur auf direkte Nutzeranweisung ändern.
 - Drucker kann **USB oder WLAN** verbunden sein – beides muss identisch funktionieren
   ( Auswahl über `lpstat`, Druck über `lp -d NAME`, CUPS abstrahiert die Verbindung).
 
