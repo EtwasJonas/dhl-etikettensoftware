@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-dhl_label.py â€“ DHL-Versandmarke aus A4-PDF croppen und auf einen
+dhl_label.py – DHL-Versandmarke aus A4-PDF croppen und auf einen
 Thermoetikettendrucker (4x6 / 10x15) drucken.
 
 Modi:
-  watch                 Ãœberwacht den Watch-Ordner und druckt neue PDFs automatisch
+  watch                 Überwacht den Watch-Ordner und druckt neue PDFs automatisch
   print DATEI           Druckt eine bestimmte PDF-Datei
   print-latest          Druckt die neueste passende PDF im Watch-Ordner (Desktop-Icon)
   crop IN [OUT]         Croppt nur (Test/Vorschau), ohne zu drucken
   calibrate             Interaktive Kalibrierungsdrucke
   show-config           Zeigt die effektive Konfiguration an
+  printers              Listet Drucker auf (CUPS bzw. Windows-Druckertreiber)
+  setup                 Windows: Setup-GUI öffnen (auch bei Start ohne Argument)
 
-Konfiguration: ~/.config/dhl-label/config.conf
+Druck-Backend: Linux/macOS → lp/CUPS, Windows → GDI über den eingerichteten
+Druckertreiber (win_backend.py, Rasterdruck via pypdfium2).
+
+Konfiguration: Linux: ~/.config/dhl-label/config.conf
+               Windows: %APPDATA%\\dhl-label\\config.conf
+               (Überschreibbar via DHL_LABEL_CONFIG)
 """
 
 import argparse
@@ -27,15 +34,51 @@ import tempfile
 import time
 from pathlib import Path
 
+from gui_helpers import default_config_path
+
 MM_TO_PT = 72.0 / 25.4
 
-CONFIG_PATH = Path(
-    os.environ.get("DHL_LABEL_CONFIG", "~/.config/dhl-label/config.conf")
-).expanduser()
+CONFIG_PATH = default_config_path()
+
+# Logdatei nur unter Windows (Linux: journald/stdout); None = kein Datei-Log
+_LOG_PATH = None
+if os.name == "nt":
+    try:
+        from win_backend import log_file as _win_log_file
+
+        _LOG_PATH = _win_log_file()
+    except Exception:
+        _LOG_PATH = None
+
+
+def _append_log_file(line):
+    if _LOG_PATH is None:
+        return
+    try:
+        _LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            if _LOG_PATH.stat().st_size > 1_000_000:
+                old = _LOG_PATH.with_suffix(".old")
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+                _LOG_PATH.replace(old)
+        except OSError:
+            pass
+        with open(_LOG_PATH, "a", encoding="utf-8", errors="replace") as fh:
+            fh.write(line + "\n")
+    except OSError:
+        pass
 
 
 def log(msg):
-    print(msg, flush=True)
+    line = str(msg)
+    try:
+        print(line, flush=True)
+    except (OSError, AttributeError, ValueError):
+        pass  # windowed-EXE hat kein stdout
+    _append_log_file(line)
 
 
 class Config:
@@ -45,7 +88,9 @@ class Config:
         if not path.exists():
             raise SystemExit(
                 f"Keine Konfiguration gefunden: {path}\n"
-                "Bitte zuerst install.sh ausfÃ¼hren oder DHL_LABEL_CONFIG setzen."
+                + ("Bitte zuerst das Setup starten (dhl-label setup / Doppelklick)."
+                   if os.name == "nt" else
+                   "Bitte zuerst install.sh ausführen oder DHL_LABEL_CONFIG setzen.")
             )
         cp = configparser.ConfigParser()
         cp.read(path, encoding="utf-8")
@@ -101,7 +146,7 @@ def parse_size_mm(text):
 # ---------------------------------------------------------------- Cropping
 
 def _crop_region(page, cfg):
-    """Berechnet die Crop-Region (in Punkten, absolut) fÃ¼r eine PDF-Seite."""
+    """Berechnet die Crop-Region (in Punkten, absolut) für eine PDF-Seite."""
     box = page.mediabox
     W, H = float(box.width), float(box.height)
     left, bottom = float(box.left), float(box.bottom)
@@ -119,7 +164,7 @@ def _crop_region(page, cfg):
 
 
 def crop_pdf(src, dst, cfg):
-    """Croppt die gewÃ¼nschte Region mit pypdf. Liefert (dst, Region) zurÃ¼ck."""
+    """Croppt die gewünschte Region mit pypdf. Liefert (dst, Region) zurück."""
     from pypdf import PdfReader, PdfWriter  # lazy import
     from pypdf.generic import RectangleObject
 
@@ -152,7 +197,7 @@ def crop_with_ghostscript(src, dst, cfg):
     y0 += cfg.trim_bottom_mm * MM_TO_PT
 
     height = y1 - y0
-    # Inhalt nach unten schieben, sodass der gewÃ¼nschte Streifen am Seitenursprung liegt
+    # Inhalt nach unten schieben, sodass der gewünschte Streifen am Seitenursprung liegt
     offset_y = -y0
     cmd = [
         "gs", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
@@ -164,10 +209,13 @@ def crop_with_ghostscript(src, dst, cfg):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)
     except FileNotFoundError:
-        raise RuntimeError(
-            "Ghostscript (gs) ist nicht installiert – Variante nicht nutzbar.\n"
-            "Installation:  sudo apt install ghostscript\n"
-            "(oder die Ghostscript-Variante überspringen)")
+        hint = ("Ghostscript (gs) ist unter Windows nicht verfügbar – "
+                "nutze die Varianten 1–3 oder 5/6 (pypdf-Einpassung)."
+                if os.name == "nt" else
+                "Ghostscript (gs) ist nicht installiert – Variante nicht nutzbar.\n"
+                "Installation:  sudo apt install ghostscript\n"
+                "(oder die Ghostscript-Variante überspringen)")
+        raise RuntimeError(hint)
     if proc.returncode != 0:
         raise RuntimeError(f"Ghostscript fehlgeschlagen:\n{proc.stderr}")
     return dst, (0, y0, W, y1)
@@ -251,7 +299,12 @@ def make_cropped(src, dst, cfg, force_gs=False, **overrides):
 # ---------------------------------------------------------------- Printing
 
 def print_pdf(path, cfg):
-    """Druckt eine (gecroppte) PDF via lp/CUPS. Gibt True bei Erfolg zurÃ¼ck."""
+    """Druckt eine (gecroppte) PDF via lp/CUPS bzw. unter Windows via GDI an
+    den eingerichteten Druckertreiber. Gibt True bei Erfolg zurück."""
+    if os.name == "nt":
+        from win_backend import print_pdf_windows
+
+        return print_pdf_windows(path, cfg)
     cmd = ["lp", "-d", cfg.printer, "-o", f"media={cfg.media}"]
     if cfg.lp_extra.strip():
         cmd += shlex.split(cfg.lp_extra)
@@ -260,7 +313,7 @@ def print_pdf(path, cfg):
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True)
     except OSError as exc:
-        log(f"lp nicht ausfÃ¼hrbar: {exc}")
+        log(f"lp nicht ausführbar: {exc}")
         return False
     if proc.returncode != 0:
         log(f"lp-Fehler (rc={proc.returncode}): {proc.stderr.strip() or proc.stdout.strip()}")
@@ -270,13 +323,13 @@ def print_pdf(path, cfg):
 
 
 def print_label(src, cfg, tmp_dir=None):
-    """Croppt src und druckt das Ergebnis. Gibt True bei Erfolg zurÃ¼ck."""
+    """Croppt src und druckt das Ergebnis. Gibt True bei Erfolg zurück."""
     base = Path(src).stem + ".label.pdf"
     dst = Path(tmp_dir or tempfile.gettempdir()) / base
     try:
         dst, region = make_cropped(src, dst, cfg)
     except Exception as exc:
-        log(f"Crop fehlgeschlagen fÃ¼r {src}: {exc}")
+        log(f"Crop fehlgeschlagen für {src}: {exc}")
         return False
     ok = print_pdf(dst, cfg)
     try:
@@ -289,7 +342,7 @@ def print_label(src, cfg, tmp_dir=None):
 # ---------------------------------------------------------------- Matching
 
 def matches(path, cfg):
-    """PrÃ¼ft, ob eine PDF gedruckt werden soll (Namensfilter im downloads-Modus)."""
+    """Prüft, ob eine PDF gedruckt werden soll (Namensfilter im downloads-Modus)."""
     if path.suffix.lower() != ".pdf":
         return False
     if cfg.watch_mode == "downloads" and cfg.filename_pattern:
@@ -311,8 +364,20 @@ def watch(cfg, process_existing=False):
     directory = cfg.watch_dir
     if not directory.is_dir():
         raise SystemExit(f"Watch-Ordner existiert nicht: {directory}")
+    # Windows: Einzelinstanz-Schutz (zwei Watcher würden doppelt drucken)
+    if os.name == "nt":
+        import atexit
+
+        from win_backend import acquire_watch_lock, release_watch_lock
+
+        ok, running_pid = acquire_watch_lock()
+        if not ok:
+            log(f"Watcher läuft bereits (PID {running_pid}) – "
+                "zweiter Start wird beendet.")
+            return
+        atexit.register(release_watch_lock)
     processed_dir = directory / cfg.processed_dirname
-    log(f"Ãœberwache {directory} (Modus: {cfg.watch_mode}, "
+    log(f"Überwache {directory} (Modus: {cfg.watch_mode}, "
         f"Filter: {repr(cfg.filename_pattern) if cfg.watch_mode == 'downloads' else 'alle PDFs'})")
 
     pending = {}
@@ -483,6 +548,11 @@ def cmd_calibrate(args, cfg):
 def cmd_show_config(args, cfg):
     log(f"Konfigurationsdatei: {CONFIG_PATH}")
     log(cfg)
+    if sys.stdout is None:  # windowed-EXE: Ergebnis auch als Dialog zeigen
+        from win_backend import show_text_dialog
+
+        show_text_dialog("DHL-Etikettensoftware – Konfiguration",
+                         f"Konfigurationsdatei: {CONFIG_PATH}\n\n{cfg}")
 
 
 def cmd_print_pdf(args, cfg):
@@ -493,7 +563,22 @@ def cmd_print_pdf(args, cfg):
 
 
 def cmd_printers(args, cfg):
-    """Listet alle CUPS-Drucker (USB und WLAN/Netzwerk) mit Gerätetyp auf."""
+    """Listet alle Drucker auf (Linux: CUPS USB/WLAN; Windows: Druckertreiber)."""
+    if os.name == "nt":
+        from win_backend import paper_sizes_text, printers_text, show_text_dialog
+
+        text = printers_text()
+        if cfg is not None and cfg.printer:
+            try:
+                text += "\n\n" + paper_sizes_text(cfg.printer)
+            except Exception as exc:
+                text += f"\n\n(Papierformate nicht lesbar: {exc})"
+        if sys.stdout is None:  # windowed-EXE: Dialog statt Konsole
+            show_text_dialog("DHL-Etikettensoftware – Drucker", text)
+        else:
+            log(text)
+        return
+
     def run(cmd):
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True)
@@ -510,12 +595,44 @@ def cmd_printers(args, cfg):
     log("\nTipp: Drucker/Medium ändern in ~/.config/dhl-label/config.conf → [printer]")
 
 
+def cmd_setup(args, cfg):
+    """Windows: Startet die tkinter-Setup-GUI (auch bei Start ohne Argument)."""
+    if os.name != "nt":
+        raise SystemExit("Setup-GUI: unter Linux 'setup-gui.sh' bzw. setup_gui.py nutzen.")
+    import traceback
+
+    try:
+        import setup_gui_win
+
+        setup_gui_win.run()
+    except BaseException:
+        try:
+            from win_backend import append_log_file
+
+            append_log_file("Setup-GUI Fehler:\n" + traceback.format_exc())
+        except Exception:
+            pass
+        raise
+    sys.exit(0)
+
+
 def main():
+    if os.name == "nt":
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
     parser = argparse.ArgumentParser(
         prog="dhl-label",
         description="DHL-Versandmarke croppen und auf 4x6-Thermoetikettendrucker drucken.",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
+    # Windows-EXE startet ohne Argument (Doppelklick) → Setup-GUI statt Fehler
+    sub = parser.add_subparsers(dest="command", required=(os.name != "nt"))
+
+    if os.name == "nt":
+        st = sub.add_parser("setup", help="Setup-GUI öffnen (Windows)")
+        st.set_defaults(func=cmd_setup)
 
     w = sub.add_parser("watch", help="Watch-Ordner überwachen")
     w.add_argument("--process-existing", action="store_true",
@@ -559,11 +676,21 @@ def main():
     pd.set_defaults(func=cmd_printers)
 
     args = parser.parse_args()
-    if args.command == "printers":
-        args.func(args, None)  # funktioniert auch ohne config.conf
-        return
-    cfg = Config()
-    args.func(args, cfg)
+    try:
+        if args.command == "printers":
+            args.func(args, None)  # funktioniert auch ohne config.conf
+            return
+        if args.command is None or args.command == "setup":
+            # Doppelklick / setup: GUI ohne config.conf erlaubt!
+            cmd_setup(args, None)
+            return
+        cfg = Config()
+        args.func(args, cfg)
+    except SystemExit as exc:
+        # windowed-EXE: Fehlermeldungen sonst unsichtbar → Log-Datei
+        if os.name == "nt" and exc.code not in (0, None):
+            _append_log_file(str(exc))
+        raise
 
 
 if __name__ == "__main__":

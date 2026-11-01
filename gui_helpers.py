@@ -4,12 +4,25 @@ gui_helpers.py – Reine Logik für den GUI-Setup-Assistenten (ohne GTK),
 damit Parsing- und Befehls-Erzeugung separat getestet werden kann.
 """
 
+import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
 
 MM_TO_PT = 72.0 / 25.4
+
+
+def default_config_path():
+    """Plattformabhängiger Standardpfad der config.conf.
+    DHL_LABEL_CONFIG überschreibt (auch für Tests)."""
+    env = os.environ.get("DHL_LABEL_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "dhl-label" / "config.conf"
+    return Path("~/.config/dhl-label/config.conf").expanduser()
 
 
 def run_cmd(cmd, timeout=15):
@@ -34,7 +47,12 @@ def parse_printers(lpstat_output):
 
 
 def list_printers():
-    """[(name, status)] aller CUPS-Drucker (USB und WLAN/Netzwerk)."""
+    """[(name, status)] aller eingerichteten Drucker (USB und WLAN/Netzwerk)
+    – Linux via CUPS (lpstat), Windows via Druck-API."""
+    if os.name == "nt":
+        from win_backend import list_printers as win_list_printers
+
+        return win_list_printers()
     _, out = run_cmd(["lpstat", "-p"])
     return parse_printers(out)
 
@@ -59,6 +77,15 @@ def parse_media(lpoptions_output):
 
 
 def media_sizes(printer):
+    """Medien-/Papierformate eines Druckers → (sizes, default, raw_line).
+    Linux: CUPS-Seitengrößen (lpoptions); Windows: Papierformate des Treibers."""
+    if os.name == "nt":
+        from win_backend import paper_sizes
+
+        papers, default_id = paper_sizes(printer)
+        names = [name for _pid, name in papers]
+        default = next((name for pid, name in papers if pid == default_id), None)
+        return names, default, f"Windows-Treiber ({len(names)} Formate)"
     result = parse_media(run_cmd(["lpoptions", "-p", printer, "-l"])[1])
     if result is None:
         return [], None, ""
@@ -124,6 +151,16 @@ def build_print_cmd(printer, media, pdf_path, extra_options=""):
 def check_environment():
     """Prüft Voraussetzungen; gibt (ok, meldungen[]) zurück."""
     problems = []
+    if os.name == "nt":
+        for modname, paket in (("pypdf", "pypdf"), ("pypdfium2", "pypdfium2"),
+                               ("PIL", "Pillow"), ("win32print", "pywin32")):
+            try:
+                __import__(modname)
+            except ImportError:
+                problems.append(
+                    f"Python-Paket fehlt: {paket}  (Installieren mit: "
+                    f"pip install {paket})")
+        return (len(problems) == 0, problems)
     if shutil.which("lpstat") is None:
         problems.append("CUPS-Druckdienst nicht gefunden (cups-client fehlt). "
                         "Bitte zuerst im Terminal ausführen:\n"
@@ -133,11 +170,53 @@ def check_environment():
     return (len(problems) == 0, problems)
 
 
-def read_installed_config(path="~/.config/dhl-label/config.conf"):
+def write_config_file(path, *, printer, media, target_size_mm="100x150",
+                      watch_mode="downloads", watch_dir="~/Downloads",
+                      filename_pattern="versand|dhl|paket", side="top",
+                      trim_top_mm=0.0, trim_bottom_mm=0.0,
+                      processed_dirname="gedruckt"):
+    """Schreibt config.conf im selben Format wie install.sh (UTF-8 ohne BOM,
+    LF-Zeilenenden). Wird von der Windows-GUI genutzt."""
+    lines = [
+        "# DHL-Etikettensoftware – Konfiguration",
+        "# (Diese Datei verwaltet die Setup-GUI; manuelle Änderungen möglich.)",
+        "",
+        "[printer]",
+        f"name = {printer}",
+        f"media = {media}",
+        "extra_options =",
+        "",
+        "[crop]",
+        f"side = {side}",
+        f"trim_top_mm = {trim_top_mm}",
+        f"trim_bottom_mm = {trim_bottom_mm}",
+        "page_index = 0",
+        "use_ghostscript = false",
+        f"target_size_mm = {target_size_mm}",
+        "rotate = auto",
+        "",
+        "[watch]",
+        f"mode = {watch_mode}",
+        f"dir = {watch_dir}",
+        f"filename_pattern = {filename_pattern}",
+        f"processed_dirname = {processed_dirname}",
+        "poll_seconds = 2.0",
+        "process_existing = false",
+        "",
+    ]
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("\n".join(lines))
+    return target
+
+
+def read_installed_config(path=None):
     """Liest die installierte Konfiguration (für die GUI-Kalibrierung)."""
     import configparser
+    p = Path(path) if path else default_config_path()
     cp = configparser.ConfigParser()
-    cp.read(str(Path(path).expanduser()), encoding="utf-8")
+    cp.read(str(p), encoding="utf-8")
 
     def get(section, key, default=""):
         try:
@@ -162,10 +241,10 @@ def read_installed_config(path="~/.config/dhl-label/config.conf"):
     }
 
 
-def installed_state(path="~/.config/dhl-label/config.conf"):
+def installed_state(path=None):
     """Ist die Software bereits installiert? → (installed, config | None).
     Installiert = config.conf vorhanden UND Druckername eingetragen."""
-    p = Path(path).expanduser()
+    p = Path(path) if path else default_config_path()
     if not p.exists():
         return False, None
     cfg = read_installed_config(str(p))

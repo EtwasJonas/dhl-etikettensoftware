@@ -1,5 +1,13 @@
+# Python
 __pycache__/
 *.pyc
 venv/
+
+# PyInstaller
+build/
+dist/
+
+# lokale Test-/Entwurfsdateien
 cropped.pdf
 *.label.pdf
+dhl-label-calibrate/

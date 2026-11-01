@@ -33,9 +33,28 @@ systemd-User-Service = „PDF herunterladen → druckt automatisch“.
 
 - Shell ist PowerShell; Bash gibt es unter `C:\Program Files\Git\bin\bash.exe` (`bash -n install.sh` = Syntaxcheck; Python-Syntaxcheck: `python -m py_compile <datei>`).
 - pypdf für Tests: installiert unter `$env:TEMP\opencode\pylibs` → mit `$env:PYTHONPATH` nutzen; Test-PDFs erzeugen mit `PdfWriter().add_blank_page(...)`; Config für Tests via `$env:DHL_LABEL_CONFIG` auf eine Temp-Config zeigen lassen (BOM-frei schreiben!).
-- **GTK/PyGObject ist auf Windows NICHT testbar** → `setup_gui.py` nur mit py_compile + sorgfältigem Lesen prüfen; echter GUI-Test nur auf dem Mint-PC.
+- **GTK/PyGObject ist auf Windows NICHT testbar** → `setup_gui.py` nur mit py_compile + sorgfältigem Lesen prüfen; echter GUI-Test nur auf dem Mint-PC. Die **Windows-GUI (`setup_gui_win.py`, tkinter) ist dagegen hier voll testbar** (Smoketest: Konstruktor bauen + destroy, ohne mainloop/Fenster).
 - Bearbeite Dateien bevorzugt mit dem edit-Tool; Nach-neu-Schreiben via PowerShell nur BOM-frei.
 - Umgebungswechsel beachten: Shell-Tool hieß früher `bash`, heißt jetzt `shell`.
+
+## Windows-11-Support (seit 11/2026)
+
+- Plattform-Verzweigungen: `os.name == "nt"` → `win_backend.py` (GDI-Druck,
+  Autostart, Watcher-Lock) + `setup_gui_win.py` (tkinter). Config unter
+  `%APPDATA%\dhl-label\config.conf`, Log unter `%LOCALAPPDATA%\dhl-label\`.
+- **Kein GTK, kein lp/gs, kein systemd unter Windows** – Ghostscript-Variante
+  4 der Kalibrierung gibt es nur unter Linux (in GUI + Fehlermeldungen beachten).
+- **Uniform-Scale gilt auch im Windows-Druckpfad** (`fit_rect` in
+  win_backend.py) – Barcode-Scannbarkeit!
+- Test-venv: `$env:TEMP\opencode\wenv` (pypdf, pywin32, pypdfium2, Pillow,
+  pyinstaller). EXE-Build: `python -m PyInstaller dhl-label-win.spec --noconfirm`.
+- windowed-EXE: PowerShell wartet nicht → `Start-Process -Wait -PassThru`;
+  Prozesse nur mit `Stop-Process -Name dhl-label` beenden (onefile Parent/Child).
+- "Microsoft Print to PDF" hängt bei StartDoc (modaler Dialog) → GDI-Tests
+  ohne EndDoc; echten Drucktest nur am realen Vretti.
+- CI `.github/workflows/windows-build.yml`: Tests unter Linux + Windows,
+  EXE-Artefakt, Release-Anhang bei Tag `v*`. **GitHub Releases für die EXE
+  nutzen** (Nutzer laden von dort).
 
 ## Quick-Referenz: wichtigste Befehle
 

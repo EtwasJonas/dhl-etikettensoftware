@@ -1,0 +1,54 @@
+name: Windows-Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  tests-linux:
+    name: Tests (Linux – schützt die Mint-Funktionalität)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install pypdf
+      - name: Shell-Syntax (install.sh / uninstall.sh)
+        run: |
+          bash -n install.sh
+          bash -n uninstall.sh
+      - name: Tests
+        run: python tests/test_core.py
+
+  build-windows:
+    name: EXE bauen (Windows)
+    runs-on: windows-latest
+    needs: tests-linux
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: pip install -r requirements-windows.txt pyinstaller
+      - name: Syntaxcheck aller Python-Dateien
+        run: python -m py_compile dhl_label.py gui_helpers.py setup_gui.py setup_gui_win.py win_backend.py
+      - name: Tests
+        run: python tests/test_core.py
+      - name: EXE bauen
+        run: python -m PyInstaller dhl-label-win.spec --noconfirm
+      - name: EXE-Artefakt hochladen
+        uses: actions/upload-artifact@v4
+        with:
+          name: dhl-label-windows
+          path: dist/dhl-label.exe
+      - name: An GitHub Release anhängen (bei Tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/dhl-label.exe

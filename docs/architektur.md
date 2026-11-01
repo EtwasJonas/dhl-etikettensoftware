@@ -12,6 +12,11 @@
 | `install.sh` | Installer, zwei Modi: interaktiv (kein Argument, Terminal-Fallback) und nicht-interaktiv per Flags (GUI ruft auf): `--printer --media --target --watch-mode downloads|custom --watch-dir --pattern --side top|bottom --no-calibrate --pkexec --non-interactive`. Im Nicht-interaktiv-Modus Pflicht-Flags validieren (sonst würde read hängen). |
 | `uninstall.sh` | Entfernt Service, Dateien, Icons, Config. Wird von install.sh zusätzlich nach APP_DIR kopiert (GUI kann aus installierter Kopie deinstallieren). |
 | `dhl-label.service` | systemd-User-Unit, `ExecStart=%h/.local/bin/dhl-label watch`, `Restart=on-failure`, `WantedBy=default.target`. |
+| `win_backend.py` | Windows-Backend: GDI-Druckpfad (pypdfium2 + Pillow + win32print/win32ui), Drucker-/Papierformate, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Stdlib (auch unter Linux importierbar). |
+| `setup_gui_win.py` | Windows-Setup-Assistent (tkinter): Formular → config.conf direkt schreiben → Autostart-Verknüpfung → GUI-Kalibrierung (Variante 4 nur Linux). |
+| `dhl-label-win.spec` | PyInstaller-Spec → `dist/dhl-label.exe` (onefile, windowed, icon.ico). |
+| `.github/workflows/windows-build.yml` | CI: Tests (Linux+Windows), EXE-Build, Release-Anhang bei Tag `v*`. |
+| `tests/test_core.py` | Minimale Test-Suite (`python tests/test_core.py`), plattformunabhängig. |
 | `README.md` | Nutzer-Doku (Download-Link der ZIP, 3-Schritte-Installation, Befehle, Kalibrierung, Fehlersuche). |
 
 ## 2. Verarbeitungs-Kette (Herzstück)
@@ -84,13 +89,29 @@ GUI-Kalibriervarianten inkl. Variante 4 mit `--target ""` (GS ohne compose).
 
 ## 6. Windows-Test-Werkzeuge (Entwickler-PC)
 
+- **Test-venv** (seit Windows-Support): `$env:TEMP\opencode\wenv` mit pypdf,
+  pywin32, pypdfium2, Pillow, pyinstaller → `& "$env:TEMP\opencode\wenv\Scripts\python.exe" …`
+  (PYTHONPATH/pylibs reicht für pywin32 nicht – DLL-Suche seit Python 3.8).
 - pypdf in `$env:TEMP\opencode\pylibs` (PYTHONPATH setzen).
 - Test-A4: `PdfWriter(); add_blank_page(width=595.28, height=841.89)`; PDF **mit Inhalt**:
   blank page + `page.replace_contents(DecodedStreamObject mit set_data(b"...re f"))`.
 - BOM-freies Schreiben von Testscripts: `[IO.File]::WriteAllText(path, text, [System.Text.UTF8Encoding]::new($false))`.
 - Config für Tests: `$env:DHL_LABEL_CONFIG` → Temp-Pfad, BOM-frei!
 - Bash: `C:\Program Files\Git\bin\bash.exe` (`-n` Syntaxcheck, `install.sh --help` testbar ohne apt).
-- lp/gs existieren nicht unter Windows → `print_pdf` gibt False (getesteter Fehlerpfad), Watcher-Test mit druckfehlern prüft Retry-Logik.
+- lp/gs existieren nicht unter Windows → `print_pdf` nutzt GDI-Backend (win_backend); Watcher-Test
+  mit Druckfehlern prüft Retry-Logik (unverändert).
+- **GUI-Smoke ohne Fenster**: tkinter-GUI-Konstruktor bauen + `root.destroy()`
+  (kein mainloop) – tkinter ist anders als GTK unter Windows voll testbar.
+- **EXE-Tests**: PyInstaller windowed-EXE wartet in PowerShell nicht →
+  `Start-Process -Wait -PassThru` nutzen; Prozesse mit `Stop-Process -Name
+  dhl-label` beenden (onefile-Parent überlebt `-Id` nicht umgekehrt: `-Id`
+  tötet nur den Bootloader, das Child läuft weiter!).
+- **"Microsoft Print to PDF" hängt bei StartDoc** (modaler Speichern-Dialog,
+  PORTPROMPT) → GDI-Pipeline nur bis `CreateDC`/`Dib.draw` + `AbortDoc`
+  testen; echten `EndDoc` nur am realen Drucker (Vretti) testen.
+- Contentstream-Analyse: pypdf prependet jede `add_transformation` – die
+  effektive Punkt-Abbildung komponiert man in **umgekehrter** Stream-Reihenfolge
+  (PDF-Row-Vektoren: letzter `cm` wirkt zuerst).
 
 ## 7. Fehler- & Robustheitsregeln
 
@@ -112,3 +133,80 @@ GUI-Kalibriervarianten inkl. Variante 4 mit `--target ""` (GS ohne compose).
    - Inhalt der oberen Hälfte landet auf der Zielseite (Ecken-Check via CTM),
      Inhalt der unteren Hälfte ist weg (außerhalb der finalen Box)
 4. Watcher-E2E: PDF in Watch-Ordner → erkannt → lp-Fehlerpfad → nach 3 Versuchen in `fehlgeschlagen/`.
+
+   → Seit 11/2026 als `tests/test_core.py` umgesetzt (`python tests/test_core.py`,
+   läuft plattformunabhängig und in CI unter Linux **und** Windows).
+
+## 9. Windows-11-Unterstützung (seit 11/2026)
+
+### 9.1 Neue Dateien
+
+| Datei | Rolle |
+|---|---|
+| `win_backend.py` | Windows-Backend: GDI-Druckpfad, Drucker-/Papierformate via Druck-API, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Standardbibliothek (auch unter Linux importierbar für Tests). |
+| `setup_gui_win.py` | Setup-Assistent für Windows (tkinter; GTK3 ist unter Windows nicht praktikabel). Schreibt Config direkt, richtet Autostart ein, GUI-Kalibrierung (Variante 1/2/3/5/6; Variante 4 = Ghostscript nur Linux). |
+| `dhl-label-win.spec` | PyInstaller-Spec → `dist/dhl-label.exe` (onefile, windowed, icon.ico). |
+| `.github/workflows/windows-build.yml` | CI: Tests auf Linux + Windows, PyInstaller-Build, Upload-Artefakt, Release-Anhang bei Tag `v*`. |
+| `requirements-windows.txt` | pypdf, pypdfium2, Pillow, pywin32. |
+| `icon.ico` | Windows-Icon (aus icon.png generiert). |
+| `tests/test_core.py` | Minimale Test-Suite (§8). |
+
+### 9.2 Plattform-Verzweigungen in bestehendem Code
+
+- `dhl_label.py`: `CONFIG_PATH = default_config_path()` (gui_helpers) –
+  Windows: `%APPDATA%\dhl-label\config.conf`; env `DHL_LABEL_CONFIG` überschreibt
+  weiterhin. `print_pdf` → nt: `win_backend.print_pdf_windows`, sonst `lp`.
+  `main()` ohne Argument unter Windows → `cmd_setup` (Doppelklick = GUI);
+  Unterbefehl `setup` nur auf Windows registriert. `log()` schreibt unter
+  Windows zusätzlich nach `%LOCALAPPDATA%\dhl-label\dhl-label.log`
+  (windowed-EXE hat kein stdout; `print` fängt das mit try/except ab).
+- `gui_helpers.py`: `list_printers`/`media_sizes`/`check_environment` mit
+  Windows-Dispatch; `installed_state`/`read_installed_config` defaulten auf
+  `default_config_path()` (GTK-GUI übergibt expliziten Pfad – unverändert).
+  Neu: `write_config_file` (BOM-frei, LF – gleiche Werte wie install.sh).
+
+### 9.3 Druckpfad Windows (GDI-Raster)
+
+1. gecroppte PDF (compose macht exakt Etikettengröße) → `pypdfium2` rendert
+   Seite 1 bei 600 dpi in ein PIL-Image.
+2. DEVMODE vom Treiber holen (`GetPrinter` Level 2), Papierformat setzen:
+   `cfg.media` wird gegen die Treiber-Liste (`DeviceCapabilities` DC_PAPERNAMES)
+   gematcht – exakt, dann fuzzy (Normalisierung ohne Sonderzeichen, Substring
+   beidseitig); ohne Treffer → Treiber-Standard + Hinweis-Log.
+   Orientation = Landscape, wenn Bild quer. Normalisierung via
+   `DocumentProperties(DM_IN_BUFFER|DM_OUT_BUFFER)`.
+3. `win32gui.CreateDC("WINSPOOL", name, devmode)` → `StartDoc/StartPage` →
+   `PIL.ImageWin.Dib.draw()` auf den Drucker-DC → `EndPage/EndDoc`.
+4. **Uniform-Scale auch hier**: Zielrechteck = druckbarer Bereich
+   (HORZRES×VERTRES) bei Offset (PHYSICALOFFSETX/Y), Bild uniform eingepasst
+   (`fit_rect`: `s = min(aw/iw, ah/ih)`, zentriert) – nie verzerrt. Fehler
+   (Drucker offline, Treiber-Fehler) → False → Watcher-Retry (3×) →
+   `fehlgeschlagen/` (identische Semantik wie lp).
+5. "Microsoft Print to PDF" zeigt beim `StartDoc` einen modalen
+   Speichern-Dialog (PORTPROMPT) – deshalb: lokaler Test nur bis `CreateDC` +
+   `Dib.draw` + `AbortDoc`; der echte `EndDoc`-Test gehört zum Vretti-
+   Hardware-Test.
+
+### 9.4 Watcher/Autostart unter Windows
+
+- Einzelinstanz-Lock: `%LOCALAPPDATA%\dhl-label\watcher.lock` (PID +
+  `OpenProcess`-Alive-Check) – zweiter `watch`-Start beendet sich sofort
+  (verhindert Doppeldruck).
+- Autostart = `.lnk` im Startmenü-Autostart-Ordner (kein Admin): Ziel = EXE
+  (`watch`-Argument) bzw. `pythonw.exe dhl_label.py watch` im Dev-Fall.
+  GUI-Checkbox steuert Anlegen/Entfernen; „Watcher jetzt starten“ spawn't
+  detached (`DETACHED_PROCESS`).
+- Konfigurationidentisch zur Linux-Struktur; `processed_dirname = gedruckt`
+  etc. funktionieren unverändert (pathlib).
+
+### 9.5 EXE & CI
+
+- `dhl-label.exe`: onefile, windowed (keine Konsole), Icon `icon.ico`.
+  Ohne Argument → Setup-GUI; `setup`-Unterbefehl dito; `printers`/
+  `show-config` zeigen Dialogfenster, wenn stdout fehlt.
+- CI (`windows-build.yml`): Tests unter ubuntu (inkl. `bash -n` der
+  Shell-Installer – schützt die Mint-Seite) und windows → PyInstaller-Build →
+  Artefakt; bei Tag `v*` hängt `softprops/action-gh-release` die EXE ans
+  Release an.
+- Lokal testen: venv mit `requirements-windows.txt` + `pyinstaller`,
+  `python -m PyInstaller dhl-label-win.spec --noconfirm`.
