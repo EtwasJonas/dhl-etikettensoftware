@@ -115,7 +115,11 @@ def test_default_config_path_platform():
             assert "dhl-label" in str(path) and str(path).endswith("config.conf")
             assert "AppData" in str(path) or str(path).startswith(str(Path.home()))
         else:
-            assert str(path) == "~/.config/dhl-label/config.conf"
+            # expanduser: echtes Home-Verzeichnis (wie der alte CONFIG_PATH-Code)
+            s = str(path)
+            assert s.endswith(".config/dhl-label/config.conf"), s
+            assert not s.startswith("~"), f"~ sollte expandiert sein: {s}"
+            assert Path(s).is_absolute(), s
     finally:
         if old is not None:
             os.environ["DHL_LABEL_CONFIG"] = old
