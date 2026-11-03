@@ -41,17 +41,38 @@
 - tests/test_core.py: 16 Tests (inkl. x-Zuschnitt-Region), CI grün auf
   Linux + Windows.
 
+### Linux-Parität „Option A“ umgesetzt (03.11.2026)
+
+- **Zuschnitt-Felder (mm oben/unten/links/rechts) in der GTK-GUI:**
+  im Hauptformular (Vorbefüllung aus der installierten Config, Validierung)
+  und im **Kalibrier-Dialog** mit **„Werte speichern“** – schreibt die
+  config.conf via `gh.write_config_file` + `systemctl --user restart
+  dhl-label`, damit Feintuning während der Kalibrierung OHNE Installer-Lauf
+  (apt/pkexec/venv) möglich ist. Alle Varianten nutzen die Dialog-Werte als
+  Basis (`--trim-*` vor den Varianten-Args); Variante 2/3 überschreiben
+  oben/unten mit 5 mm.
+- **install.sh:** neue Flags `--trim-top/--trim-bottom/--trim-left/
+  --trim-right` (Komma→Punkt + Zahlen-Regex, Validierung BEVOR installiert
+  wird), interaktive Fragen (4 Prompts mit Erklärtext, Enter = 0),
+  config.conf schreibt jetzt alle vier Keys (zuvor fehlten left/right ganz).
+- **gui_helpers:** `parse_trim_mm` (Komma erlaubt, ≥ 0, NaN/inf abgelehnt),
+  `build_install_cmd` mit Trim-Params, `write_config_file` mit neuem
+  `extra_options`-Param (manuelle lp-Optionen bleiben beim GUI-Speichern
+  erhalten). Windows-GUI nutzt denselben Parser (einheitliche Validierung).
+- **dhl_label:** `show-config` zeigt auch trim_left/right; `calibrate`-Hints
+  nennen alle vier Keys.
+- tests/test_core.py: **18 Tests** (+`parse_trim_mm`, +`build_install_cmd`
+  mit Trims), lokal grün; Smoketest Windows-GUI (Vorbefüllung + save-Pfad)
+  grün. GTK-GUI nur py_compile + Lesen (unter Windows nicht lauffähig).
+
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
 - **Release v1.1.0 ist live** (03.11.2026): `dhl-label.exe` hängt am Release
   (https://github.com/EtwasJonas/dhl-etikettensoftware/releases), gebaut von CI
   aus `b3d30f0`. Hinweis: Workflow-Berechtigung `contents: write` nachgereicht
   (`cc09cc0`) – bei zukünftigen Tags `v*` baut + hängt CI die EXE automatisch an.
-- **Offene Entscheidung (Nutzer):** Linux angleichen?
-  - **Option A (klein):** Zuschnitt-Felder (oben/unten/links/rechts) in GTK-GUI +
-    install.sh + Kalibriervarianten; trims funktionieren auf Linux bereits
-    (Core-Code + Config-Keys, CLI-Flags vorhanden) – nur die Linux-Tools
-    fragen sie noch nicht ab.
+- **Offene Entscheidung (Nutzer):** Linux angleichen? → **Option A ist
+  erledigt** (siehe oben). Übrig bleibt:
   - **Option B (mittel):** eigene Rasterung auf Linux (pypdfium2/Pillow als neue
     Linux-Deps, gerastertes Schwarz/Weiß-PDF via lp) – erst nach dem ersten
     echten Mint-Test entscheiden, ob CUPS nicht ohnehin gut genug druckt.
@@ -101,3 +122,6 @@ docs/architektur.md §8.3) und Testdruck-Bestätigungen beibehalten.
 - 03.11.2026: trim_left/right_mm, Custom-Size exakt nach target_size_mm,
   4×-Übersampling+Schwellwert-Rasterung, 1:1-Zeichnung, EXE-Installation in
   %LOCALAPPDATA%\DHL-Etiketten, realer Hardware-Test SN 420B bestanden
+- 03.11.2026: Option A – Zuschnitt-Felder in GTK-GUI (Formular + Kalibrier-
+  Dialog mit „Werte speichern“), install.sh-Flags --trim-*/Fragen/Config-Keys,
+  parse_trim_mm, write_config_file(extra_options), 18 Tests

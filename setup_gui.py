@@ -55,6 +55,14 @@ def ui(func, *args):
     GLib.idle_add(func, *args)
 
 
+def trim_display_text(raw):
+    """Zuschnitt-Wert (String aus der Config) sicher als Anzeige-Text (z.B. '16.24')."""
+    try:
+        return f"{gh.parse_trim_mm(raw):g}"
+    except ValueError:
+        return "0"
+
+
 class SetupWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="DHL-Etikettensoftware – Setup")
@@ -130,6 +138,32 @@ class SetupWindow(Gtk.Window):
                                     "damit Barcode/QR-Code unverzerrt und scannbar bleiben.</small>")
         self.target_hint.set_line_wrap(True)
         form.attach(self.target_hint, 1, row, 2, 1)
+        row += 1
+
+        # --- Zuschnitt (Kalibrierung) ---
+        add_label("<b>Zusätzlich abschneiden</b> (mm):", row)
+        self.trim_top = Gtk.Entry()
+        self.trim_bottom = Gtk.Entry()
+        self.trim_left = Gtk.Entry()
+        self.trim_right = Gtk.Entry()
+        trim_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        for label_text, entry in (("oben:", self.trim_top),
+                                  ("unten:", self.trim_bottom),
+                                  ("links:", self.trim_left),
+                                  ("rechts:", self.trim_right)):
+            entry.set_width_chars(5)
+            entry.set_text("0")
+            trim_box.pack_start(Gtk.Label(label=label_text), False, False, 2)
+            trim_box.pack_start(entry, False, False, 2)
+        form.attach(trim_box, 1, row, 2, 1)
+        row += 1
+        self.trim_hint = Gtk.Label(xalign=0)
+        self.trim_hint.set_markup(
+            "<small>mm, die zusätzlich vom Rand weggeschnitten werden (Kalibrierung: "
+            "falls Teile angeschnitten werden oder Ränder ungleich sind – "
+            "meist 0 lassen).</small>")
+        self.trim_hint.set_line_wrap(True)
+        form.attach(self.trim_hint, 1, row, 2, 1)
         row += 1
 
         # --- Watch-Modus ---
@@ -239,6 +273,11 @@ class SetupWindow(Gtk.Window):
                 pass
         if (cfg.get("side") or "top") == "bottom":
             self.side_bottom.set_active(True)
+        for entry, key in ((self.trim_top, "trim_top_mm"),
+                           (self.trim_bottom, "trim_bottom_mm"),
+                           (self.trim_left, "trim_left_mm"),
+                           (self.trim_right, "trim_right_mm")):
+            entry.set_text(trim_display_text(cfg.get(key)))
         self.install_btn.set_label("Einstellungen aktualisieren")
         self.status_label.set_markup(
             '<span foreground="green"><b>✓ Bereits installiert</b></span> – '
@@ -326,6 +365,12 @@ class SetupWindow(Gtk.Window):
             gh.parse_size_mm(target_text)
         except ValueError as exc:
             return str(exc)
+        for entry, name in ((self.trim_top, "oben"), (self.trim_bottom, "unten"),
+                            (self.trim_left, "links"), (self.trim_right, "rechts")):
+            try:
+                gh.parse_trim_mm(entry.get_text())
+            except ValueError as exc:
+                return f"Zuschnitt {name}: {exc}"
         if self.mode_downloads.get_active():
             pattern = self.pattern_entry.get_text().strip()
             if not pattern:
@@ -338,6 +383,14 @@ class SetupWindow(Gtk.Window):
         error = self.validate()
         if error:
             self.show_error(error)
+            return
+        try:
+            trim_top = gh.parse_trim_mm(self.trim_top.get_text())
+            trim_bottom = gh.parse_trim_mm(self.trim_bottom.get_text())
+            trim_left = gh.parse_trim_mm(self.trim_left.get_text())
+            trim_right = gh.parse_trim_mm(self.trim_right.get_text())
+        except ValueError as exc:  # validate() prüft das bereits – doppelt hält besser
+            self.show_error(str(exc))
             return
         self.installing = True
         self.install_btn.set_sensitive(False)
@@ -354,7 +407,9 @@ class SetupWindow(Gtk.Window):
 
         cmd = gh.build_install_cmd(
             INSTALL_SH, printer=printer, media=media, target=target,
-            watch_mode=watch_mode, watch_dir=watch_dir, pattern=pattern, side=side)
+            watch_mode=watch_mode, watch_dir=watch_dir, pattern=pattern, side=side,
+            trim_top=trim_top, trim_bottom=trim_bottom,
+            trim_left=trim_left, trim_right=trim_right)
 
         self.log(f"$ {' '.join(cmd)}\n")
 
@@ -497,6 +552,7 @@ class CalibrationWindow(Gtk.Window):
         self.busy = False
 
         cfg = gh.read_installed_config(CONFIG_FILE)
+        self.cfg = cfg
         self.printer = cfg["printer"]
         self.media = cfg["media"]
         self.extra_options = cfg["extra_options"]
@@ -512,8 +568,10 @@ class CalibrationWindow(Gtk.Window):
             "Wähle eine Variante, bestätige den Testdruck und vergleiche die Ausdrucke:\n"
             "Passt die Marke komplett auf das Etikett und ist der Barcode scannbar?\n"
             f"Drucker: <b>{self.printer}</b> · Medium: <b>{self.media}</b>\n"
-            "Beste Variante später in ~/.config/dhl-label/config.conf eintragen "
-            "(oder dieses Setup erneut laufen lassen).")
+            "Die Zuschnitt-Felder gelten für alle Varianten (vorbefüllt aus der "
+            "Konfiguration; Variante 2/3 überschreiben oben/unten mit 5 mm).\n"
+            "Passt eine Variante? Zuschnitt-Werte eintragen → <b>„Werte speichern“</b> "
+            "(schreibt die Konfiguration und startet den Hintergrunddienst neu).")
         intro.set_line_wrap(True)
         box.pack_start(intro, False, False, 0)
 
@@ -546,6 +604,33 @@ class CalibrationWindow(Gtk.Window):
         variant_box.pack_start(self.print_btn, False, False, 0)
         box.pack_start(variant_box, False, False, 0)
 
+        # --- Zuschnitt (gilt als Basis für alle Varianten) ---
+        self.cal_trim_top = Gtk.Entry()
+        self.cal_trim_bottom = Gtk.Entry()
+        self.cal_trim_left = Gtk.Entry()
+        self.cal_trim_right = Gtk.Entry()
+        cal_trim_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
+        for label_text, entry, key in (("oben:", self.cal_trim_top, "trim_top_mm"),
+                                       ("unten:", self.cal_trim_bottom, "trim_bottom_mm"),
+                                       ("links:", self.cal_trim_left, "trim_left_mm"),
+                                       ("rechts:", self.cal_trim_right, "trim_right_mm")):
+            entry.set_width_chars(5)
+            entry.set_text(trim_display_text(cfg.get(key)))
+            cal_trim_box.pack_start(Gtk.Label(label=label_text), False, False, 2)
+            cal_trim_box.pack_start(entry, False, False, 2)
+        self.save_btn = Gtk.Button(label="Werte speichern")
+        self.save_btn.set_tooltip_text(
+            "Zuschnitt-Werte in die Einstellungen schreiben und den "
+            "Hintergrunddienst neu starten (kein Testdruck).")
+        self.save_btn.connect("clicked", self.on_save_trims_clicked)
+        cal_trim_box.pack_end(self.save_btn, False, False, 4)
+        box.pack_start(cal_trim_box, False, False, 0)
+        cal_trim_hint = Gtk.Label(xalign=0)
+        cal_trim_hint.set_markup(
+            "<small>mm, die zusätzlich vom Rand weggeschnitten werden (0 = nichts).</small>")
+        cal_trim_hint.set_line_wrap(True)
+        box.pack_start(cal_trim_hint, False, False, 0)
+
         scroll = Gtk.ScrolledWindow()
         scroll.set_vexpand(True)
         scroll.set_min_content_height(200)
@@ -567,6 +652,17 @@ class CalibrationWindow(Gtk.Window):
         buf.insert(buf.get_end_iter(), text.rstrip("\n") + "\n")
         self.log_view.scroll_mark_onscreen(buf.get_insert())
 
+    def _trim_args(self):
+        """CLI-Args --trim-* aus den Dialog-Feldern (Basis für alle Varianten).
+        Löst ValueError aus, wenn ein Feld keine Zahl ≥ 0 enthält."""
+        args = []
+        for entry, flag in ((self.cal_trim_top, "--trim-top"),
+                            (self.cal_trim_bottom, "--trim-bottom"),
+                            (self.cal_trim_left, "--trim-left"),
+                            (self.cal_trim_right, "--trim-right")):
+            args += [flag, f"{gh.parse_trim_mm(entry.get_text()):g}"]
+        return args
+
     def on_print_clicked(self, btn):
         if self.busy:
             return
@@ -576,6 +672,11 @@ class CalibrationWindow(Gtk.Window):
             return
         idx = self.variant_combo.get_active()
         name, variant_args = self.VARIANTS[idx]
+        try:
+            trim_args = self._trim_args()
+        except ValueError as exc:
+            self.message(Gtk.MessageType.ERROR, str(exc))
+            return
 
         dlg = Gtk.MessageDialog(transient_for=self, flags=0,
                                 message_type=Gtk.MessageType.QUESTION,
@@ -595,7 +696,8 @@ class CalibrationWindow(Gtk.Window):
 
         def worker():
             import subprocess
-            crop_cmd = gh.build_crop_cmd(self.venv_python, self.dhl_label_py, src, out, variant_args)
+            crop_cmd = gh.build_crop_cmd(self.venv_python, self.dhl_label_py, src, out,
+                                         trim_args + variant_args)
             ui(self.log, f"$ {' '.join(str(c) for c in crop_cmd)}")
             rc, outp = gh.run_cmd(crop_cmd, timeout=60)
             ui(self.log, outp or "(keine Ausgabe)")
@@ -618,6 +720,77 @@ class CalibrationWindow(Gtk.Window):
     def done(self):
         self.busy = False
         self.print_btn.set_sensitive(True)
+        self.save_btn.set_sensitive(True)
+
+    def on_save_trims_clicked(self, btn):
+        """Zuschnitt-Werte ohne Testdruck in die Einstellungen schreiben und den
+        Hintergrunddienst neu starten – Feintuning während der Kalibrierung,
+        ohne 'Einstellungen aktualisieren' (Installer-Lauf) zu benötigen."""
+        if self.busy:
+            return
+        try:
+            trim_top = gh.parse_trim_mm(self.cal_trim_top.get_text())
+            trim_bottom = gh.parse_trim_mm(self.cal_trim_bottom.get_text())
+            trim_left = gh.parse_trim_mm(self.cal_trim_left.get_text())
+            trim_right = gh.parse_trim_mm(self.cal_trim_right.get_text())
+        except ValueError as exc:
+            self.message(Gtk.MessageType.ERROR, str(exc))
+            return
+        dlg = Gtk.MessageDialog(transient_for=self, flags=0,
+                                message_type=Gtk.MessageType.QUESTION,
+                                buttons=Gtk.ButtonsType.YES_NO,
+                                text="Zuschnitt-Werte in die Einstellungen übernehmen?")
+        dlg.set_secondary_text(
+            f"oben {trim_top:g} · unten {trim_bottom:g} · links {trim_left:g} · "
+            f"rechts {trim_right:g} mm\n\n"
+            "Es wird die Konfiguration geschrieben und der Hintergrunddienst neu "
+            "gestartet – danach druckt der Watcher mit diesen Werten. "
+            "(Kein Testdruck – es wird kein Etikett verbraucht.)")
+        answer = dlg.run()
+        dlg.destroy()
+        if answer != Gtk.ResponseType.YES:
+            return
+
+        self.busy = True
+        self.print_btn.set_sensitive(False)
+        self.save_btn.set_sensitive(False)
+
+        def worker():
+            try:
+                gh.write_config_file(
+                    CONFIG_FILE,
+                    printer=self.printer,
+                    media=self.media,
+                    extra_options=self.extra_options,
+                    target_size_mm=self.cfg.get("target_size_mm") or "",
+                    watch_mode=self.cfg.get("watch_mode") or "downloads",
+                    watch_dir=self.cfg.get("watch_dir") or "~/Downloads",
+                    filename_pattern=self.cfg.get("filename_pattern") or "",
+                    side=self.cfg.get("side") or "top",
+                    trim_top_mm=trim_top, trim_bottom_mm=trim_bottom,
+                    trim_left_mm=trim_left, trim_right_mm=trim_right)
+                ui(self.log, f"Konfiguration geschrieben: {CONFIG_FILE}")
+                rc, _outp = gh.run_cmd(
+                    ["systemctl", "--user", "restart", "dhl-label.service"])
+                if rc == 0:
+                    ui(self.log, "Hintergrunddienst neu gestartet – "
+                                 "die Werte sind ab jetzt aktiv.")
+                else:
+                    ui(self.log, f"Achtung: Dienst-Neustart fehlgeschlagen (rc={rc}). "
+                                 "Falls nötig im Terminal: systemctl --user restart dhl-label")
+                ui(self._refresh_parent)
+            except Exception as exc:
+                ui(self.log, f"Fehler beim Speichern: {exc}")
+            finally:
+                ui(self.done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _refresh_parent(self):
+        """Setup-Fenster nach dem Speichern aktualisieren (Vorbefüllung/Status)."""
+        parent = self.get_transient_for()
+        if parent and hasattr(parent, "refresh_installed_state"):
+            parent.refresh_installed_state()
 
     def message(self, mtype, text):
         dlg = Gtk.MessageDialog(transient_for=self, flags=0, message_type=mtype,

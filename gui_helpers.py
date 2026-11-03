@@ -4,6 +4,7 @@ gui_helpers.py – Reine Logik für den GUI-Setup-Assistenten (ohne GTK),
 damit Parsing- und Befehls-Erzeugung separat getestet werden kann.
 """
 
+import math
 import os
 import re
 import shutil
@@ -103,13 +104,33 @@ def parse_size_mm(text):
     return (float(m.group(1)), float(m.group(2)))
 
 
+def parse_trim_mm(text):
+    """Zuschnitt-Angabe (mm) → float; ''/0 → 0.0; Komma erlaubt; sonst ValueError.
+    (Negativ/NaN/inf werden abgelehnt – es wird nur abgeschnitten.)"""
+    value = (text or "").strip().replace(",", ".")
+    if not value or value in ("0", "0.0"):
+        return 0.0
+    try:
+        result = float(value)
+    except ValueError:
+        raise ValueError(f"Ungültiger Zuschnitt: {text!r} – Zahl in mm, z.B. 5 oder 2,5")
+    if not math.isfinite(result) or result < 0:
+        raise ValueError("Zuschnitt muss eine Zahl ≥ 0 sein (mm, die abgeschnitten werden).")
+    return result
+
+
 def build_install_cmd(install_sh, *, printer, media, target, watch_mode,
-                      watch_dir, pattern, side):
+                      watch_dir, pattern, side,
+                      trim_top=0.0, trim_bottom=0.0, trim_left=0.0, trim_right=0.0):
     """Baut die Kommandozeile für install.sh (nicht-interaktiver Modus)."""
     cmd = ["bash", str(install_sh),
            "--printer", printer,
            "--media", media,
            "--target", target,
+           "--trim-top", f"{trim_top:g}",
+           "--trim-bottom", f"{trim_bottom:g}",
+           "--trim-left", f"{trim_left:g}",
+           "--trim-right", f"{trim_right:g}",
            "--watch-mode", watch_mode,
            "--watch-dir", watch_dir,
            "--pattern", pattern,
@@ -175,7 +196,7 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
                       filename_pattern="versand|dhl|paket", side="top",
                       trim_top_mm=0.0, trim_bottom_mm=0.0,
                       trim_left_mm=0.0, trim_right_mm=0.0,
-                      processed_dirname="gedruckt"):
+                      extra_options="", processed_dirname="gedruckt"):
     """Schreibt config.conf im selben Format wie install.sh (UTF-8 ohne BOM,
     LF-Zeilenenden). Wird von der Windows-GUI genutzt."""
     lines = [
@@ -185,7 +206,7 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
         "[printer]",
         f"name = {printer}",
         f"media = {media}",
-        "extra_options =",
+        f"extra_options = {extra_options}",
         "",
         "[crop]",
         f"side = {side}",

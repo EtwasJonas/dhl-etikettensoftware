@@ -10,6 +10,10 @@
 #   --printer NAME        CUPS-Druckername (USB oder WLAN)
 #   --media NAME          CUPS-Mediengröße (z.B. 4x6)
 #   --target SIZEXSIZE    Etikettengröße in mm (z.B. 100x150); leer = nur croppen
+#   --trim-top MM         mm zusätzlich oben abschneiden (0 = aus)
+#   --trim-bottom MM      mm zusätzlich unten abschneiden
+#   --trim-left MM        mm zusätzlich links abschneiden
+#   --trim-right MM       mm zusätzlich rechts abschneiden
 #   --watch-mode MODE     downloads | custom
 #   --watch-dir PFAD      zu überwachender Ordner
 #   --pattern REGEX       Namensfilter (downloads-Modus)
@@ -32,6 +36,7 @@ warn() { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
 FLAG_PRINTER="" FLAG_MEDIA="" FLAG_TARGET="" FLAG_WATCH_MODE="" FLAG_WATCH_DIR="" FLAG_PATTERN="" FLAG_SIDE=""
+FLAG_TRIM_TOP="" FLAG_TRIM_BOTTOM="" FLAG_TRIM_LEFT="" FLAG_TRIM_RIGHT=""
 NO_CALIBRATE=0 USE_PKEXEC=0 NONINTERACTIVE=0
 
 usage() {
@@ -43,6 +48,10 @@ while [ $# -gt 0 ]; do
     --printer)        FLAG_PRINTER="${2:-}";   shift 2 ;;
     --media)          FLAG_MEDIA="${2:-}";     shift 2 ;;
     --target)         FLAG_TARGET="${2:-}";    shift 2 ;;
+    --trim-top)       FLAG_TRIM_TOP="${2:-}";     shift 2 ;;
+    --trim-bottom)    FLAG_TRIM_BOTTOM="${2:-}";  shift 2 ;;
+    --trim-left)      FLAG_TRIM_LEFT="${2:-}";    shift 2 ;;
+    --trim-right)     FLAG_TRIM_RIGHT="${2:-}";   shift 2 ;;
     --watch-mode)     FLAG_WATCH_MODE="${2:-}"; shift 2 ;;
     --watch-dir)      FLAG_WATCH_DIR="${2:-}"; shift 2 ;;
     --pattern)        FLAG_PATTERN="${2:-}";   shift 2 ;;
@@ -54,6 +63,21 @@ while [ $# -gt 0 ]; do
     *) die "Unbekannte Option: $1 (siehe --help)" ;;
   esac
 done
+
+# Zuschnitt-Werte normalisieren (Komma → Punkt, leer = 0) und prüfen,
+# BEVOR etwas installiert wird (auch im interaktiven Modus bei Flags).
+norm_trim() {
+  local value="${1//,/.}"
+  value="${value:-0}"
+  if ! [[ "$value" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    die "Ungültiger Zuschnitt: '$1' (Zahl in mm, z.B. 5 oder 2.5)"
+  fi
+  printf '%s' "$value"
+}
+TRIM_TOP="$(norm_trim "$FLAG_TRIM_TOP")"
+TRIM_BOTTOM="$(norm_trim "$FLAG_TRIM_BOTTOM")"
+TRIM_LEFT="$(norm_trim "$FLAG_TRIM_LEFT")"
+TRIM_RIGHT="$(norm_trim "$FLAG_TRIM_RIGHT")"
 
 # Im nicht-interaktiven Modus (GUI) müssen die Pflicht-Flags gesetzt sein,
 # sonst würde das Skript auf eine Terminal-Eingabe warten und ewig hängen.
@@ -213,6 +237,28 @@ fi
 CROP_SIDE="top"
 [ "$SIDE" = "u" ] && CROP_SIDE="bottom"
 
+# ---------------------------------------------------------------- Zuschnitt (Kalibrierung)
+if [ "$NONINTERACTIVE" -eq 0 ]; then
+  if [ -n "$FLAG_TRIM_TOP$FLAG_TRIM_BOTTOM$FLAG_TRIM_LEFT$FLAG_TRIM_RIGHT" ]; then
+    info "Zuschnitt (vorgegeben): oben=$TRIM_TOP unten=$TRIM_BOTTOM links=$TRIM_LEFT rechts=$TRIM_RIGHT mm"
+  else
+    echo ""
+    echo "Erklärung: Mit dem 'Zuschnitt' schneidest du zusätzlich Millimeter von"
+    echo "den Rändern der Marke ab – z.B. wenn Teile angeschnitten werden oder"
+    echo "die Scheren-Linie des A4-Bogens sichtbar bleibt. Für den ersten Druck"
+    echo "einfach je Enter drücken (0 = nichts abschneiden); feinjustieren kannst"
+    echo "du später im GUI-Setup (Felder „Zusätzlich abschneiden“)."
+    read -r -p "mm zusätzlich OBEN abschneiden [0]: " IN_TRIM
+    TRIM_TOP="$(norm_trim "$IN_TRIM")"
+    read -r -p "mm zusätzlich UNTEN abschneiden [0]: " IN_TRIM
+    TRIM_BOTTOM="$(norm_trim "$IN_TRIM")"
+    read -r -p "mm zusätzlich LINKS abschneiden [0]: " IN_TRIM
+    TRIM_LEFT="$(norm_trim "$IN_TRIM")"
+    read -r -p "mm zusätzlich RECHTS abschneiden [0]: " IN_TRIM
+    TRIM_RIGHT="$(norm_trim "$IN_TRIM")"
+  fi
+fi
+
 # ---------------------------------------------------------------- Dateien installieren
 info "Installiere nach $APP_DIR …"
 mkdir -p "$APP_DIR" "$BIN_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR" "$DESKTOP_DIR"
@@ -253,8 +299,10 @@ extra_options =
 
 [crop]
 side = $CROP_SIDE
-trim_top_mm = 0.0
-trim_bottom_mm = 0.0
+trim_top_mm = $TRIM_TOP
+trim_bottom_mm = $TRIM_BOTTOM
+trim_left_mm = $TRIM_LEFT
+trim_right_mm = $TRIM_RIGHT
 page_index = 0
 use_ghostscript = false
 target_size_mm = $TARGET

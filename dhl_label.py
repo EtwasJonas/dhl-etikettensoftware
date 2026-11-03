@@ -124,7 +124,9 @@ class Config:
         return (
             f"printer={self.printer!r} media={self.media!r} lp_extra={self.lp_extra!r}\n"
             f"crop: side={self.side} trim_top={self.trim_top_mm}mm "
-            f"trim_bottom={self.trim_bottom_mm}mm page={self.page_index} gs={self.use_ghostscript}\n"
+            f"trim_bottom={self.trim_bottom_mm}mm "
+            f"trim_left={self.trim_left_mm}mm trim_right={self.trim_right_mm}mm "
+            f"page={self.page_index} gs={self.use_ghostscript}\n"
             f"ziel: groesse={target} rotate={self.rotate}\n"
             f"watch: mode={self.watch_mode} dir={self.watch_dir} "
             f"pattern={self.filename_pattern!r} processed={self.processed_dirname!r}"
@@ -551,7 +553,8 @@ def cmd_calibrate(args, cfg):
         log("Etikette beschriften (Variante merken)!\n")
     log("Fertig. Trage die Werte der besten Variante in die config.conf ein:")
     log(f"  {CONFIG_PATH}")
-    log("  [crop] trim_top_mm / trim_bottom_mm  → Bereich eingrenzen")
+    log("  [crop] trim_top_mm / trim_bottom_mm  → Bereich oben/unten eingrenzen")
+    log("  [crop] trim_left_mm / trim_right_mm  → Bereich links/rechts eingrenzen")
     log("  [crop] target_size_mm (z.B. 100x150) → exakte Etikettengröße")
     log("  [crop] rotate (auto/90/270)          → falls die Marke verkehrt herum steht")
     log("Tipp: 'dhl-label crop DATEI.pdf' erzeugt ohne Druck eine Vorschau-PDF.")

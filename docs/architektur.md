@@ -5,11 +5,11 @@
 | Datei | Rolle |
 |---|---|
 | `dhl_label.py` | Kern-CLI: `watch` `print` `print-latest` `crop` `calibrate` `show-config` `printers` `print-pdf`. Crop/Dreh/Skalier-Logik (pypdf), lp-Druck, Watcher-Loop. **Kein** GUI-Code. |
-| `gui_helpers.py` | Pure Logik ohne GTK (Windows-testbar): `list_printers`, `media_sizes`, `parse_size_mm`, `build_install_cmd`, `calibration_variants`, `build_crop_cmd`, `build_print_cmd`, `check_environment`, `read_installed_config`, `installed_state` (Erkennung bestehender Installation für die GUI). |
+| `gui_helpers.py` | Pure Logik ohne GTK (Windows-testbar): `list_printers`, `media_sizes`, `parse_size_mm`, `parse_trim_mm`, `build_install_cmd`, `calibration_variants`, `build_crop_cmd`, `build_print_cmd`, `check_environment`, `write_config_file`, `read_installed_config`, `installed_state` (Erkennung bestehender Installation für die GUI). |
 | `icon.png` | Fenster-/Desktop-Icon der GUI und der Desktop-Einträge. |
-| `setup_gui.py` | GTK3-Setup-Assistent (Formular → install.sh-Flags → Log-Streaming → Erfolg → GUI-Kalibrierdialog; Installations-Erkennung mit Vorbefüllung, Deinstallieren-Knopf). Läuft mit **System-Python** (`/usr/bin/python3`), nicht im venv (GTK liegt im System, pypdf im venv). |
+| `setup_gui.py` | GTK3-Setup-Assistent (Formular → install.sh-Flags → Log-Streaming → Erfolg → GUI-Kalibrierdialog; Installations-Erkennung mit Vorbefüllung, Deinstallieren-Knopf). Zuschnitt-Felder (mm oben/unten/links/rechts) im Formular und im Kalibrier-Dialog inkl. „Werte speichern“ (schreibt config.conf via `write_config_file` + `systemctl --user restart dhl-label` – Feintuning ohne Installer-Lauf). Läuft mit **System-Python** (`/usr/bin/python3`), nicht im venv (GTK liegt im System, pypdf im venv). |
 | `setup-gui.sh` | Doppelklick-Launcher für die GUI (`exec /usr/bin/python3 "$(dirname "$0")/setup_gui.py"`); braucht einmalig exec-Bit nach ZIP-Entpacken. |
-| `install.sh` | Installer, zwei Modi: interaktiv (kein Argument, Terminal-Fallback) und nicht-interaktiv per Flags (GUI ruft auf): `--printer --media --target --watch-mode downloads|custom --watch-dir --pattern --side top|bottom --no-calibrate --pkexec --non-interactive`. Im Nicht-interaktiv-Modus Pflicht-Flags validieren (sonst würde read hängen). |
+| `install.sh` | Installer, zwei Modi: interaktiv (kein Argument, Terminal-Fallback) und nicht-interaktiv per Flags (GUI ruft auf): `--printer --media --target --trim-top --trim-bottom --trim-left --trim-right --watch-mode downloads|custom --watch-dir --pattern --side top|bottom --no-calibrate --pkexec --non-interactive`. Im Nicht-interaktiv-Modus Pflicht-Flags validieren (sonst würde read hängen); Zuschnitt-Werte werden (in beiden Modi) normalisiert (Komma→Punkt, leer=0) und gegen Zahlen-Regex geprüft, bevor installiert wird. |
 | `uninstall.sh` | Entfernt Service, Dateien, Icons, Config. Wird von install.sh zusätzlich nach APP_DIR kopiert (GUI kann aus installierter Kopie deinstallieren). |
 | `dhl-label.service` | systemd-User-Unit, `ExecStart=%h/.local/bin/dhl-label watch`, `Restart=on-failure`, `WantedBy=default.target`. |
 | `win_backend.py` | Windows-Backend: GDI-Druckpfad (pypdfium2 + Pillow + win32print/win32ui), Drucker-/Papierformate, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Stdlib (auch unter Linux importierbar). |
@@ -42,6 +42,8 @@ extra_options =            # zusätzliche lp-Optionen (shlex-split)
 side = top                 # top | bottom | full
 trim_top_mm = 0.0
 trim_bottom_mm = 0.0
+trim_left_mm = 0.0         # mm, die zusätzlich weggeschnitten werden (Kalibrierung)
+trim_right_mm = 0.0
 page_index = 0             # 0 = erste Seite
 use_ghostscript = false    # GS-Hardcrop statt pypdf
 target_size_mm = 100x150   # leer/0 = nur croppen (kein compose)
@@ -81,11 +83,13 @@ GUI-Kalibriervarianten inkl. Variante 4 mit `--target ""` (GS ohne compose).
 ## 5. install.sh – zwei Modi
 
 - Ohne Flags: wie bisher interaktiv (Fragen zu Drucker/Medium/Etikettengröße/
-  Watch-Modus/Side), mit Einsteiger-Erklärtexten.
+  Zuschnitt/Watch-Modus/Side), mit Einsteiger-Erklärtexten.
 - Mit Flags: `--pkexec` für apt (GUI-Passwortdialog), `--non-interactive`
   verhindert JEDES `read` (Pflicht-Flags werden vorher validiert, sonst `die`).
   `--target ""` (leer) ist erlaubt = nur croppen; in `--non-interactive` darf der
   leere Wert NICHT zum interaktiven Prompt führen (Bedingung: `-n FLAG_TARGET || NONINTERACTIVE`).
+  Die vier Zuschnitt-Flags (`--trim-*`) sind optional (Default 0); GUI übergibt
+  sie immer (validiert via `parse_trim_mm`).
 
 ## 6. Windows-Test-Werkzeuge (Entwickler-PC)
 

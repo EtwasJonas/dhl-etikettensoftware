@@ -53,9 +53,13 @@ Früher: manuelles PDF → Druckdialog mit falschen Einstellungen. Ziel:
 6. Gedreht + exakt auf **101,6×152,4 mm** (4"×6") eingepasst
 
 Beste Variante → Werte in `~/.config/dhl-label/config.conf` unter `[crop]`
-(`trim_top_mm`, `trim_bottom_mm`, `target_size_mm`, `rotate`). Vorschau ohne
-Druck: `dhl-label crop DATEI.pdf [OUT.pdf]` (Optionen `--target --rotate
---trim-top --trim-bottom --gs`).
+(`trim_top_mm`, `trim_bottom_mm`, `trim_left_mm`, `trim_right_mm`,
+`target_size_mm`, `rotate`) – oder komfortabel in der GUI: Felder
+„Zusätzlich abschneiden“ im Setup-Fenster (→ „Einstellungen aktualisieren“)
+bzw. Zuschnitt-Felder im Kalibrier-Dialog (→ „Werte speichern“, schreibt die
+Config + startet den Dienst neu). Vorschau ohne Druck:
+`dhl-label crop DATEI.pdf [OUT.pdf]` (Optionen `--target --rotate
+--trim-top --trim-bottom --trim-left --trim-right --gs`).
 
 ## Offene Punkte vom Nutzer (beim ersten echten Lauf klären)
 

@@ -4,7 +4,7 @@
 test_core.py – Minimale Test-Suite (kein pytest nötig: python tests/test_core.py).
 
 Plattformunabhängig (läuft unter Linux und Windows in CI):
-  - Parser (Size, lpstat/lpoptions)
+  - Parser (Size, Trim-Zuschnitt, lpstat/lpoptions)
   - Config-Pfad-Auflösung + write_config_file (BOM-frei, LF)
   - Crop-/Compose-Geometrie auf synthetischem A4-Test-PDF:
     Zielseite exakt 100x150 mm, Uniform-Scale-Assert (|a|==|d|, |b|==|c|)
@@ -76,6 +76,44 @@ def test_parse_media():
     assert gh.parse_media("keine passende zeile") is None
     sizes, default, _raw = gh.parse_media("media: *4x6 100x150")
     assert sizes == ["4x6", "100x150"] and default == "4x6"
+
+
+def test_parse_trim_mm():
+    """Zuschnitt-Eingaben: Komma erlaubt, leer = 0, Negativ/Unsinn abgelehnt."""
+    assert gh.parse_trim_mm("") == 0.0
+    assert gh.parse_trim_mm("0") == 0.0
+    assert gh.parse_trim_mm(" 5 ") == 5.0
+    assert gh.parse_trim_mm("16,24") == 16.24
+    assert gh.parse_trim_mm("3.08") == 3.08
+    for bad in ("abc", "-1", "nan", "inf", "1x2"):
+        try:
+            gh.parse_trim_mm(bad)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"parse_trim_mm({bad!r}) sollte ValueError werfen")
+
+
+def test_build_install_cmd_with_trims():
+    """install.sh-Flags enthalten die Zuschnitt-Werte (GUI → Installer)."""
+    cmd = gh.build_install_cmd(
+        "install.sh", printer="Vretti", media="4x6", target="101.6x152.4",
+        watch_mode="downloads", watch_dir="/home/u/Downloads",
+        pattern="versand|dhl|paket", side="top",
+        trim_top=16.24, trim_bottom=16.66, trim_left=3.08, trim_right=4.13)
+    expected = ["--trim-top", "16.24", "--trim-bottom", "16.66",
+                "--trim-left", "3.08", "--trim-right", "4.13"]
+    start = cmd.index("--trim-top")
+    assert cmd[start:start + 8] == expected, cmd
+    assert "--non-interactive" in cmd and "--pkexec" in cmd
+    # Default: alle vier Zuschnitt-Flags vorhanden (0, keine Lücken)
+    default = gh.build_install_cmd(
+        "install.sh", printer="V", media="M", target="100x150",
+        watch_mode="downloads", watch_dir="/home/u/Downloads",
+        pattern="p", side="top")
+    assert default[default.index("--trim-top"):default.index("--trim-top") + 8] == \
+        ["--trim-top", "0", "--trim-bottom", "0",
+         "--trim-left", "0", "--trim-right", "0"]
 
 
 def test_calibration_variants_and_cmds():
@@ -417,6 +455,8 @@ TESTS = [
     test_parse_size_mm,
     test_parse_printers,
     test_parse_media,
+    test_parse_trim_mm,
+    test_build_install_cmd_with_trims,
     test_calibration_variants_and_cmds,
     test_default_config_path_env_override,
     test_default_config_path_platform,

@@ -409,12 +409,12 @@ class SetupWindow:
                 messagebox.showerror("Fehler", str(exc))
                 return
         try:
-            trim_top = float((self.trim_top_var.get() or "0").replace(",", ".") or 0)
-            trim_bottom = float((self.trim_bottom_var.get() or "0").replace(",", ".") or 0)
-            trim_left = float((self.trim_left_var.get() or "0").replace(",", ".") or 0)
-            trim_right = float((self.trim_right_var.get() or "0").replace(",", ".") or 0)
-        except ValueError:
-            messagebox.showerror("Fehler", "Zuschnitt muss eine Zahl sein (z.B. 5 oder 2,5).")
+            trim_top = gh.parse_trim_mm(self.trim_top_var.get())
+            trim_bottom = gh.parse_trim_mm(self.trim_bottom_var.get())
+            trim_left = gh.parse_trim_mm(self.trim_left_var.get())
+            trim_right = gh.parse_trim_mm(self.trim_right_var.get())
+        except ValueError as exc:
+            messagebox.showerror("Fehler", str(exc))
             return
         watch_dir = self.watch_dir_var.get().strip()
         if not watch_dir:

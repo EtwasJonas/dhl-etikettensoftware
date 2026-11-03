@@ -85,18 +85,24 @@ die GUI direkt – kein Terminal.
 2. **Mediengröße** übernehmen (vorausgewählt ist, was der Drucker
    meldet – meist `4x6`)
 3. **Etikettengröße der Rolle** eintragen (Vretti-Rollen meist `100x150` mm)
-4. Wählen, **wann gedruckt** wird: Downloads-Ordner mit Namensfilter
+4. **Zusätzlich abschneiden (mm)** – oben/unten/links/rechts, meist alles
+   0 lassen; Kalibrier-Werte trägst du hier oder direkt im Kalibrier-Dialog
+   ein (z.B. um die Scheren-Linie des A4-Bogens zu entfernen)
+5. Wählen, **wann gedruckt** wird: Downloads-Ordner mit Namensfilter
    (`versand|dhl|paket`) oder eigener Watch-Ordner (alle PDFs)
-5. Wo die Marke im A4-PDF sitzt: **obere/untere Hälfte**
-6. **„Installation starten“** – ein Passwortdialog (pkexec) erscheint
+6. Wo die Marke im A4-PDF sitzt: **obere/untere Hälfte**
+7. **„Installation starten“** – ein Passwortdialog (pkexec) erscheint
    für die Systempakete; der Fortschritt läuft live im Fenster mit
 
 **Schritt 5 – Kalibrieren (optional, empfohlen):** Nach der Installation
 erscheint „Jetzt kalibrieren (Testdrucke)“. Variante wählen, jede
 Ausgabe auf dem Etikett mit einer Nummer beschriften und vergleichen –
-**jeder Testdruck passiert nur nach Bestätigung**. Passt eine Variante,
-nochmal dieselbe Zahl in `~/.config/dhl-label/config.conf` unter `[crop]`
-eintragen (oder das Setup erneut laufen lassen und die Werte dort setzen).
+**jeder Testdruck passiert nur nach Bestätigung**. Im Kalibrier-Dialog
+lassen sich zusätzlich Zuschnitt-Werte (mm, oben/unten/links/rechts)
+ausprobieren – sie gelten für alle Varianten. Passt eine Variante, die
+Werte dort eintragen und **„Werte speichern“** klicken: das schreibt die
+Konfiguration und startet den Hintergrunddienst neu (kein Installer-Lauf
+nötig).
 
 Danach schließt das Fenster – im Hintergrund läuft der Watcher als
 systemd-User-Service und startet bei jeder Anmeldung selbst.
@@ -123,6 +129,9 @@ Der Installer fragt interaktiv ab:
   einfach mit Enter übernehmen
 - **Etikettengröße der Rolle** (z.B. `100x150`): das gecroppte A4-Stück wird
   auf diese Größe gedreht und exakt eingepasst
+- **Zuschnitt** (oben/unten/links/rechts in mm): mm, die zusätzlich vom Rand
+  abgeschnitten werden – meist 0 lassen (je Enter); feinjustieren kannst du
+  später im GUI-Setup oder Kalibrier-Dialog
 - Watch-Modus: **Downloads-Ordner mit Namensfilter** (`versand|dhl|paket`)
   oder **eigener Watch-Ordner** (alle PDFs)
 - Position der Marke im A4-PDF (obere/untere Hälfte)
@@ -219,10 +228,15 @@ Passt keine Variante: Werte in `~/.config/dhl-label/config.conf` unter
 `[crop]` anpassen und mit `dhl-label crop DATEI.pdf` eine Vorschau-PDF
 ohne Druck erzeugen (öffnet sie z.B. mit einem PDF-Viewer zum Prüfen):
 
-- `trim_top_mm` / `trim_bottom_mm` – Markenbereich eingrenzen (mm)
+- `trim_top_mm` / `trim_bottom_mm` – Bereich oben/unten eingrenzen (mm)
+- `trim_left_mm` / `trim_right_mm` – Bereich links/rechts eingrenzen (mm)
 - `target_size_mm` – z.B. `100x150`; leer = nur croppen
 - `rotate` – `auto` (Standard), `0`, `90`, `270` (falls die Marke
   verkehrt herum auf dem Etikett landet)
+
+Statt die config.conf per Hand zu editieren, kannst du die Werte auch in
+der GUI eintragen: Felder „Zusätzlich abschneiden“ im Setup-Fenster bzw.
+Zuschnitt-Felder mit **„Werte speichern“** im Kalibrier-Dialog.
 
 ## Konfiguration
 
@@ -239,7 +253,7 @@ extra_options =               # zusaetzliche lp-Optionen (nur Linux, z.B. "-o la
 side = top                    # top | bottom | full
 trim_top_mm = 0.0
 trim_bottom_mm = 0.0
-trim_left_mm = 0.0            # Windows: Kartenränder feinjustieren (Kalibrierung)
+trim_left_mm = 0.0            # Zuschnitt feinjustieren (Kalibrierung)
 trim_right_mm = 0.0
 page_index = 0                # 0 = erste Seite
 use_ghostscript = false       # Fallback-Cropping (nur Linux – gs gibt es unter Windows nicht)
