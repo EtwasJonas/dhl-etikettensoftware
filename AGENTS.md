@@ -70,6 +70,9 @@ journalctl --user -u dhl-label -f
 # Repo:
 git add -A && git commit -m "..." && git push
 gh repo view EtwasJonas/dhl-etikettensoftware --json isPrivate   # Sichtbarkeit pruefen (aktuell: public, nicht aendern)
+# Release (EXE fuer Windows-Nutzer):
+git tag vX.Y.Z && git push origin vX.Y.Z   # CI baut EXE + haengt sie ans Release (contents:write)
+gh release view vX.Y.Z --json assets       # Asset pruefen (aktuell live: v1.1.0)
 ```
 
 ## Minimale Sanity-Checks vor jedem Push

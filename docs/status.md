@@ -41,13 +41,26 @@
 - tests/test_core.py: 16 Tests (inkl. x-Zuschnitt-Region), CI grün auf
   Linux + Windows.
 
-## Nächster Schritt: Release
+## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
-- Tag `v1.1.0` pushen → CI baut die EXE und hängt sie ans GitHub Release an
-  (Nutzer laden von https://github.com/EtwasJonas/dhl-etikettensoftware/releases).
-- Offen vom Nutzer: Alltags-Check auf dem Mint-PC (bisher nur Windows
-  verifiziert); dort gelten die Kalibrier-Werte NICHT automatisch (CUPS-Layout
-  kann abweichen → Kalibrierung vor Ort).
+- **Release v1.1.0 ist live** (03.11.2026): `dhl-label.exe` hängt am Release
+  (https://github.com/EtwasJonas/dhl-etikettensoftware/releases), gebaut von CI
+  aus `b3d30f0`. Hinweis: Workflow-Berechtigung `contents: write` nachgereicht
+  (`cc09cc0`) – bei zukünftigen Tags `v*` baut + hängt CI die EXE automatisch an.
+- **Offene Entscheidung (Nutzer):** Linux angleichen?
+  - **Option A (klein):** Zuschnitt-Felder (oben/unten/links/rechts) in GTK-GUI +
+    install.sh + Kalibriervarianten; trims funktionieren auf Linux bereits
+    (Core-Code + Config-Keys, CLI-Flags vorhanden) – nur die Linux-Tools
+    fragen sie noch nicht ab.
+  - **Option B (mittel):** eigene Rasterung auf Linux (pypdfium2/Pillow als neue
+    Linux-Deps, gerastertes Schwarz/Weiß-PDF via lp) – erst nach dem ersten
+    echten Mint-Test entscheiden, ob CUPS nicht ohnehin gut genug druckt.
+- **Alltagsbetrieb Windows läuft** (Watcher auf dem Nutzer-PC aktiv,
+  EXE installiert unter `%LOCALAPPDATA%\DHL-Etiketten\`).
+- **Mint-PC:** erster echter Test + Endkalibrierung vor Ort – die Windows-
+  Kalibrier-Werte gelten NICHT automatisch (CUPS-Media/Ränder können abweichen).
+  Lokale Test-Artefakte für die Vermessung: `testdrucke/` (gitignored,
+  Windows-lastig – Vermessungs-Skripte mit numpy/pypdfium2).
 
 ## Bekannte Restrisiken
 
