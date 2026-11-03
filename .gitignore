@@ -11,3 +11,4 @@ dist/
 cropped.pdf
 *.label.pdf
 dhl-label-calibrate/
+testdrucke/

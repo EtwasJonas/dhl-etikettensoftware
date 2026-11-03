@@ -239,6 +239,8 @@ extra_options =               # zusaetzliche lp-Optionen (nur Linux, z.B. "-o la
 side = top                    # top | bottom | full
 trim_top_mm = 0.0
 trim_bottom_mm = 0.0
+trim_left_mm = 0.0            # Windows: Kartenränder feinjustieren (Kalibrierung)
+trim_right_mm = 0.0
 page_index = 0                # 0 = erste Seite
 use_ghostscript = false       # Fallback-Cropping (nur Linux – gs gibt es unter Windows nicht)
 target_size_mm = 100x150      # exakte Etikettengroesse; leer = nur croppen
@@ -252,6 +254,13 @@ processed_dirname = gedruckt
 poll_seconds = 2.0
 process_existing = false
 ```
+
+Windows-Zusatz: Bei gesetztem `target_size_mm` wird dem Treiber die
+**exakte Etikettengröße als Custom-Size** übergeben (Treiber-Vorgaben wie
+„4 x 6" können z.B. 104,2 mm statt 101,6 mm messen → Inhalt säße sonst
+versetzt) und in der druckernativen Auflösung gerastert (4× übersampelt,
+BOX-geglättet, Schwellwert auf Schwarz/Weiß – volle Striche, kein
+Grau-Dithering).
 
 ## Fehlersuche
 

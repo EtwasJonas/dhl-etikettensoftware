@@ -87,6 +87,8 @@ class SetupWindow:
         self.target_var = tk.StringVar(value="100x150")
         self.trim_top_var = tk.StringVar(value="0")
         self.trim_bottom_var = tk.StringVar(value="0")
+        self.trim_left_var = tk.StringVar(value="0")
+        self.trim_right_var = tk.StringVar(value="0")
         self.watch_mode_var = tk.StringVar(value="downloads")
         self.watch_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.pattern_var = tk.StringVar(value=DEFAULT_PATTERN)
@@ -166,15 +168,27 @@ class SetupWindow:
         trim_frame = ttk.Frame(form)
         trim_frame.grid(row=row, column=1, sticky="w", pady=3)
         ttk.Label(trim_frame, text="oben:").pack(side="left")
-        self.trim_top_entry = ttk.Entry(trim_frame, width=6,
+        self.trim_top_entry = ttk.Entry(trim_frame, width=5,
                                         textvariable=self.trim_top_var)
-        self.trim_top_entry.pack(side="left", padx=(4, 14))
+        self.trim_top_entry.pack(side="left", padx=(4, 10))
         ttk.Label(trim_frame, text="unten:").pack(side="left")
-        self.trim_bottom_entry = ttk.Entry(trim_frame, width=6,
+        self.trim_bottom_entry = ttk.Entry(trim_frame, width=5,
                                            textvariable=self.trim_bottom_var)
-        self.trim_bottom_entry.pack(side="left", padx=4)
-        ttk.Label(trim_frame, text="mm (falls die Marke angeschnitten wird – "
-                                   "meist 0 lassen)").pack(side="left", padx=(8, 0))
+        self.trim_bottom_entry.pack(side="left", padx=(4, 10))
+        ttk.Label(trim_frame, text="links:").pack(side="left")
+        self.trim_left_entry = ttk.Entry(trim_frame, width=5,
+                                         textvariable=self.trim_left_var)
+        self.trim_left_entry.pack(side="left", padx=(4, 10))
+        ttk.Label(trim_frame, text="rechts:").pack(side="left")
+        self.trim_right_entry = ttk.Entry(trim_frame, width=5,
+                                          textvariable=self.trim_right_var)
+        self.trim_right_entry.pack(side="left", padx=4)
+        row += 1
+        ttk.Label(form, text="mm, die zusätzlich weggeschnitten werden (Kalibrierung: "
+                             "falls Inhalte angeschnitten werden oder Ränder ungleich "
+                             "sind – meist 0 lassen).", wraplength=560,
+                  foreground="#555").grid(row=row, column=1, columnspan=2,
+                                          sticky="w", pady=(0, 4))
         row += 1
 
         # Watch-Modus
@@ -304,6 +318,16 @@ class SetupWindow:
                                    or str(Path.home() / "Downloads"))
             self.pattern_var.set(cfg.get("filename_pattern") or DEFAULT_PATTERN)
             self.side_var.set(cfg.get("side", "top"))
+            for var, key in ((self.trim_top_var, "trim_top_mm"),
+                             (self.trim_bottom_var, "trim_bottom_mm"),
+                             (self.trim_left_var, "trim_left_mm"),
+                             (self.trim_right_var, "trim_right_mm")):
+                raw = (cfg.get(key) or "0").replace(",", ".")
+                try:
+                    value = float(raw)
+                except ValueError:
+                    value = 0.0
+                var.set(f"{value:g}")
         else:
             self.banner.configure(text="Noch nicht eingerichtet.",
                                   foreground="#555")
@@ -387,6 +411,8 @@ class SetupWindow:
         try:
             trim_top = float((self.trim_top_var.get() or "0").replace(",", ".") or 0)
             trim_bottom = float((self.trim_bottom_var.get() or "0").replace(",", ".") or 0)
+            trim_left = float((self.trim_left_var.get() or "0").replace(",", ".") or 0)
+            trim_right = float((self.trim_right_var.get() or "0").replace(",", ".") or 0)
         except ValueError:
             messagebox.showerror("Fehler", "Zuschnitt muss eine Zahl sein (z.B. 5 oder 2,5).")
             return
@@ -416,8 +442,15 @@ class SetupWindow:
                     filename_pattern=pattern,
                     side=self.side_var.get(),
                     trim_top_mm=trim_top,
-                    trim_bottom_mm=trim_bottom)
+                    trim_bottom_mm=trim_bottom,
+                    trim_left_mm=trim_left,
+                    trim_right_mm=trim_right)
                 self._ui(self._log, f"Konfiguration geschrieben: {path}")
+                if getattr(sys, "frozen", False):
+                    installed_exe = win_backend.install_exe_copy()
+                    if installed_exe:
+                        self._ui(self._log,
+                                 f"Programm installiert: {installed_exe}")
                 if self.autostart_var.get():
                     win_backend.create_autostart_shortcut()
                     self._ui(self._log,

@@ -135,7 +135,8 @@ def test_write_config_file_roundtrip():
             target_size_mm="100x150", watch_mode="downloads",
             watch_dir=str(Path(tmp) / "Downloads"),
             filename_pattern="versand|dhl|paket", side="top",
-            trim_top_mm=5.0, trim_bottom_mm=2.5)
+            trim_top_mm=5.0, trim_bottom_mm=2.5,
+            trim_left_mm=3.04, trim_right_mm=4.04)
         data = path.read_bytes()
         assert not data.startswith(b"\xef\xbb\xbf"), "config.conf darf kein BOM haben"
         assert b"\r" not in data, "config.conf muss LF-Zeilenenden haben"
@@ -145,6 +146,8 @@ def test_write_config_file_roundtrip():
         assert cfg.side == "top"
         assert cfg.trim_top_mm == 5.0
         assert cfg.trim_bottom_mm == 2.5
+        assert cfg.trim_left_mm == 3.04
+        assert cfg.trim_right_mm == 4.04
         assert cfg.target_mm == (100.0, 150.0)
         assert cfg.watch_mode == "downloads"
         assert cfg.rotate == "auto"
@@ -212,12 +215,32 @@ def test_crop_pdf_top_half():
         src = Path(tmp) / "a4.pdf"
         _write_test_a4(src)
         cfg = SimpleNamespace(side="top", trim_top_mm=0.0, trim_bottom_mm=0.0,
+                              trim_left_mm=0.0, trim_right_mm=0.0,
                               page_index=0, use_ghostscript=False)
         dst = Path(tmp) / "crop.pdf"
         _, region = dhl_label.crop_pdf(src, dst, cfg)
         l, b, r, t = region
         assert abs(r - l - 595.28) < 0.5
         assert abs(t - b - 841.89 / 2) < 0.5  # obere Hälfte
+        assert abs(b - 841.89 / 2) < 0.5
+
+
+def test_crop_region_with_x_trims():
+    """trim_left/right verschieben/begrenzen die Crop-Region in x-Richtung."""
+    import dhl_label
+
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "a4.pdf"
+        _write_test_a4(src)
+        cfg = SimpleNamespace(side="top", trim_top_mm=0.0, trim_bottom_mm=0.0,
+                              trim_left_mm=10.0, trim_right_mm=20.0,
+                              page_index=0, use_ghostscript=False)
+        dst = Path(tmp) / "crop_trims.pdf"
+        _, region = dhl_label.crop_pdf(src, dst, cfg)
+        l, b, r, t = region
+        assert abs(l - 10.0 * MM_TO_PT) < 0.5, f"links {l} != {10.0 * MM_TO_PT}"
+        assert abs(r - (595.28 - 20.0 * MM_TO_PT)) < 0.5, f"rechts {r}"
+        # y unverändert (obere Hälfte)
         assert abs(b - 841.89 / 2) < 0.5
 
 
@@ -288,6 +311,7 @@ def test_compose_target_uniform_scale_and_corners():
         src = Path(tmp) / "a4.pdf"
         _write_test_a4(src)
         cfg = SimpleNamespace(side="top", trim_top_mm=0.0, trim_bottom_mm=0.0,
+                              trim_left_mm=0.0, trim_right_mm=0.0,
                               page_index=0, rotate="auto", use_ghostscript=False)
         dst = Path(tmp) / "composed.pdf"
         _, region = dhl_label.compose_target(src, dst, cfg, (100.0, 150.0))
@@ -319,6 +343,7 @@ def test_compose_target_rot270_still_uniform():
         src = Path(tmp) / "a4.pdf"
         _write_test_a4(src)
         cfg = SimpleNamespace(side="top", trim_top_mm=0.0, trim_bottom_mm=0.0,
+                              trim_left_mm=0.0, trim_right_mm=0.0,
                               page_index=0, rotate="270", use_ghostscript=False)
         dst = Path(tmp) / "composed270.pdf"
         dhl_label.compose_target(src, dst, cfg, (100.0, 150.0))
@@ -399,6 +424,7 @@ TESTS = [
     test_config_env_override_used_by_dhl_label,
     test_matches_filter,
     test_crop_pdf_top_half,
+    test_crop_region_with_x_trims,
     test_compose_target_uniform_scale_and_corners,
     test_compose_target_rot270_still_uniform,
     test_fit_rect_uniform,

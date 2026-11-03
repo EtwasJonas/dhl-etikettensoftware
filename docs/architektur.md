@@ -165,27 +165,36 @@ GUI-Kalibriervarianten inkl. Variante 4 mit `--target ""` (GS ohne compose).
   `default_config_path()` (GTK-GUI übergibt expliziten Pfad – unverändert).
   Neu: `write_config_file` (BOM-frei, LF – gleiche Werte wie install.sh).
 
-### 9.3 Druckpfad Windows (GDI-Raster)
+### 9.3 Druckpfad Windows (GDI-Raster, Hardware-verifiziert am SN 420B/Vretti)
 
-1. gecroppte PDF (compose macht exakt Etikettengröße) → `pypdfium2` rendert
-   Seite 1 bei 600 dpi in ein PIL-Image.
-2. DEVMODE vom Treiber holen (`GetPrinter` Level 2), Papierformat setzen:
-   `cfg.media` wird gegen die Treiber-Liste (`DeviceCapabilities` DC_PAPERNAMES)
-   gematcht – exakt, dann fuzzy (Normalisierung ohne Sonderzeichen, Substring
-   beidseitig); ohne Treffer → Treiber-Standard + Hinweis-Log.
-   Orientation = Landscape, wenn Bild quer. Normalisierung via
-   `DocumentProperties(DM_IN_BUFFER|DM_OUT_BUFFER)`.
-3. `win32gui.CreateDC("WINSPOOL", name, devmode)` → `StartDoc/StartPage` →
-   `PIL.ImageWin.Dib.draw()` auf den Drucker-DC → `EndPage/EndDoc`.
-4. **Uniform-Scale auch hier**: Zielrechteck = druckbarer Bereich
-   (HORZRES×VERTRES) bei Offset (PHYSICALOFFSETX/Y), Bild uniform eingepasst
-   (`fit_rect`: `s = min(aw/iw, ah/ih)`, zentriert) – nie verzerrt. Fehler
-   (Drucker offline, Treiber-Fehler) → False → Watcher-Retry (3×) →
+1. gecroppte PDF (compose macht exakt Etikettengröße) → **Custom-Size-DEVMODE**:
+   Bei gesetztem `target_size_mm` bekommt der Treiber `DMPAPER_USER` +
+   `PaperWidth/PaperLength` (zehntel mm) = exakte Etikettengröße. Wichtig, weil
+   Treiber-Vorgaben abweichen können (SN 420B „4 x 6" = 104,23 mm statt 101,6 →
+   Inhalt säße ~1,3 mm versetzt). Fallback: Papierformat-Namensmatch
+   (`cfg.media`, exakt → fuzzy) → Treiber-Standard.
+2. **Render in druckernativer Auflösung** (`LOGPIXELSX`, SN 420B: 203 dpi) mit
+   4× Übersampling → PIL BOX-Downsampling auf nativen Pixelraster →
+   Schwellwert 170 auf Schwarz/Weiß (`render_pdf_thermal`): volle Striche,
+   kein Grau-Dithering auf dem Thermokopf.
+3. `CreateDC("WINSPOOL")` → `StartDoc/StartPage` → `PIL.ImageWin.Dib.draw`:
+   Wenn Bild == Seitengröße (Normalfall) → **1:1 am Seitenursprung** (Druck ==
+   PDF-Geometrie); sonst uniform in den druckbaren Bereich eingepasst
+   (`fit_rect`), auf der physischen Seite zentriert (asymmetrische
+   Treiberränder verschieben sonst). Fehler → False → Watcher-Retry (3×) →
    `fehlgeschlagen/` (identische Semantik wie lp).
-5. "Microsoft Print to PDF" zeigt beim `StartDoc` einen modalen
+4. "Microsoft Print to PDF" zeigt beim `StartDoc` einen modalen
    Speichern-Dialog (PORTPROMPT) – deshalb: lokaler Test nur bis `CreateDC` +
-   `Dib.draw` + `AbortDoc`; der echte `EndDoc`-Test gehört zum Vretti-
-   Hardware-Test.
+   `Dib.draw` + `AbortDoc`; echter Drucktest am realen Drucker.
+
+**Verifizierte Kalibrierung (03.11.2026, SN 420B, 4"x6"-Rollen):**
+DHL-Privatkunden-A4: Marke in Zeilen 24,17–123,74 mm, Spalten 9,74–199,22 mm,
+Scheren-Linie 145,6–151,2 mm (Mittelfalz). Werte: `side = top`,
+`trim_top_mm = 16.24`, `trim_bottom_mm = 16.66`, `trim_left_mm = 3.08`,
+`trim_right_mm = 4.13`, `target_size_mm = 101.6x152.4`, `rotate = auto`.
+Resultat (druckidentisch gemessen, 4×203 dpi + Schwelle 170): Rand
+oben 5,00 / unten 5,13 mm, links/rechts je 13,39 mm, Inhalt 74,9×142,4 mm –
+Schere weg, Uniform-Scale (Barcode scannbar), keine Verzerrung.
 
 ### 9.4 Watcher/Autostart unter Windows
 

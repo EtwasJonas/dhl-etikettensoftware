@@ -174,6 +174,7 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
                       watch_mode="downloads", watch_dir="~/Downloads",
                       filename_pattern="versand|dhl|paket", side="top",
                       trim_top_mm=0.0, trim_bottom_mm=0.0,
+                      trim_left_mm=0.0, trim_right_mm=0.0,
                       processed_dirname="gedruckt"):
     """Schreibt config.conf im selben Format wie install.sh (UTF-8 ohne BOM,
     LF-Zeilenenden). Wird von der Windows-GUI genutzt."""
@@ -190,6 +191,8 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
         f"side = {side}",
         f"trim_top_mm = {trim_top_mm}",
         f"trim_bottom_mm = {trim_bottom_mm}",
+        f"trim_left_mm = {trim_left_mm}",
+        f"trim_right_mm = {trim_right_mm}",
         "page_index = 0",
         "use_ghostscript = false",
         f"target_size_mm = {target_size_mm}",
@@ -238,6 +241,10 @@ def read_installed_config(path=None):
         "filename_pattern": get("watch", "filename_pattern", default=""),
         "target_size_mm": get("crop", "target_size_mm"),
         "side": get("crop", "side", default="top"),
+        "trim_top_mm": get("crop", "trim_top_mm", default="0"),
+        "trim_bottom_mm": get("crop", "trim_bottom_mm", default="0"),
+        "trim_left_mm": get("crop", "trim_left_mm", default="0"),
+        "trim_right_mm": get("crop", "trim_right_mm", default="0"),
     }
 
 

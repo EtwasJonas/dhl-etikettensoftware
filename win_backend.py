@@ -90,6 +90,22 @@ def fit_rect(img_w, img_h, area_w, area_h):
     return x, y, w, h
 
 
+def _page_size_mm(dc):
+    """Physische Seitengröße eines Drucker-DC in mm → (w, h); (None, None) bei Fehlern."""
+    try:
+        import win32con
+
+        lp_x = dc.GetDeviceCaps(win32con.LOGPIXELSX) or 0
+        lp_y = dc.GetDeviceCaps(win32con.LOGPIXELSY) or 0
+        phys_w = dc.GetDeviceCaps(win32con.PHYSICALWIDTH)
+        phys_h = dc.GetDeviceCaps(win32con.PHYSICALHEIGHT)
+        if lp_x <= 0 or lp_y <= 0 or phys_w <= 0 or phys_h <= 0:
+            return None, None
+        return (phys_w / lp_x * 25.4, phys_h / lp_y * 25.4)
+    except Exception:
+        return None, None
+
+
 def render_pdf_first_page(pdf_path, dpi=RENDER_DPI):
     """Rendert die erste PDF-Seite als PIL-Image (lazy imports)."""
     import pypdfium2 as pdfium
@@ -101,6 +117,26 @@ def render_pdf_first_page(pdf_path, dpi=RENDER_DPI):
         return bitmap.to_pil()
     finally:
         doc.close()
+
+
+# Für Thermotransfer: harte Schwarz/Weiß-Pixel statt Grau-Dithering.
+THERMAL_SUPERSAMPLE = 4
+THERMAL_THRESHOLD = 170
+
+
+def render_pdf_thermal(pdf_path, native_dpi, factor=THERMAL_SUPERSAMPLE,
+                       threshold=THERMAL_THRESHOLD):
+    """Rendert mit facher Auflösung, mittelt dann per BOX-Filter auf die
+    native Drucker-Auflösung herunter und setzt abschließend einen
+    Schwellwert auf Schwarz/Weiß. Ergebnis: vollere Striche, keine
+    Dithering-Artefakte."""
+    from PIL import Image
+
+    image = render_pdf_first_page(pdf_path, native_dpi * factor)
+    width = max(1, round(image.width / factor))
+    height = max(1, round(image.height / factor))
+    gray = image.resize((width, height), Image.Resampling.BOX).convert("L")
+    return gray.point(lambda v: 0 if v < threshold else 255)
 
 
 # ------------------------------------------------------------- Drucker-API
@@ -225,10 +261,15 @@ def _match_paper_id(papers, wanted):
     return None
 
 
-def _prepare_devmode(printer_name, paper_wanted, landscape):
+def _prepare_devmode(printer_name, paper_wanted, landscape, target_mm=None):
     """Holt den DEVMODE des Treibers, setzt Papierformat + Ausrichtung und
     normalisiert ihn über DocumentProperties. Gibt (devmode, papier_angewendet)
-    zurück; bei Fehlern (None, False)."""
+    zurück; bei Fehlern (None, False).
+
+    Mit target_mm (tw, th) wird die EXAKTE Etikettengröße als Custom-Size
+    gesetzt (DMPAPER_USER + PaperWidth/PaperLength in zehntel mm) – wichtig,
+    weil Treiber-Vorgaben wie "4 x 6" größer sein können als das echte Etikett
+    (SN 420B: 104,2 mm statt 101,6 mm → Inhalt rutscht seitlich)."""
     import win32con
     import win32print
 
@@ -239,19 +280,29 @@ def _prepare_devmode(printer_name, paper_wanted, landscape):
         applied = False
         if devmode is None:
             return None, False
-        papers, _default = ([], None)
-        try:
-            papers, _default = paper_sizes(printer_name)
-        except Exception:
-            pass
-        paper_id = _match_paper_id(papers, paper_wanted)
-        if paper_id:
-            devmode.PaperSize = paper_id
+        if target_mm and isinstance(target_mm, (tuple, list)):
+            tw, th = float(target_mm[0]), float(target_mm[1])
+            devmode.PaperSize = win32con.DMPAPER_USER
+            # Papier selbst ist stets schmal × lang; Orientation entscheidet,
+            # ob die Seite hochkant (tw<th) oder quer (tw>th) bedruckt wird.
+            devmode.PaperWidth = int(round(min(tw, th) * 10))
+            devmode.PaperLength = int(round(max(tw, th) * 10))
+            devmode.Orientation = 2 if tw > th else 1
             applied = True
-        elif (paper_wanted or "").strip():
-            log(f"Hinweis: Papierformat {paper_wanted!r} nicht im Treiber gefunden – "
-                "Standardformat des Treibers wird verwendet.")
-        devmode.Orientation = 2 if landscape else 1  # 2 = Landscape
+        else:
+            papers, _default = ([], None)
+            try:
+                papers, _default = paper_sizes(printer_name)
+            except Exception:
+                pass
+            paper_id = _match_paper_id(papers, paper_wanted)
+            if paper_id:
+                devmode.PaperSize = paper_id
+                applied = True
+            elif (paper_wanted or "").strip():
+                log(f"Hinweis: Papierformat {paper_wanted!r} nicht im Treiber gefunden – "
+                    "Standardformat des Treibers wird verwendet.")
+            devmode.Orientation = 2 if landscape else 1  # 2 = Landscape
         result = win32print.DocumentProperties(
             0, handle, printer_name, devmode, devmode,
             win32con.DM_IN_BUFFER | win32con.DM_OUT_BUFFER)
@@ -296,7 +347,14 @@ def append_log_file(line):
 
 def print_pdf_windows(pdf_path, cfg):
     """Druckt eine fertig aufbereitete PDF (exakt Etikettengröße) still über
-    den Windows-Druckertreiber. Gibt True bei Erfolg zurück."""
+    den Windows-Druckertreiber. Gibt True bei Erfolg zurück.
+
+    - Mit target_size_mm: Custom-Size exakt auf die Etikettengröße
+      (Treiber-"4 x 6" kann z.B. 104,2 mm statt 101,6 mm breit sein).
+    - Rendert in der Drucker-nativen Auflösung (LOGPIXELS) → 1:1-Pixel,
+      kein Resampling (Barcode-Qualität).
+    - Zentriert auf der physischen Seite (asymmetrische Treiber-Ränder
+      verschieben den Inhalt nicht)."""
     from PIL import ImageWin
 
     import win32con
@@ -308,37 +366,71 @@ def print_pdf_windows(pdf_path, cfg):
     if not printer_name:
         log("Kein Druckername in der Konfiguration ([printer] name).")
         return False
-    try:
-        image = render_pdf_first_page(pdf_path, RENDER_DPI)
-    except Exception as exc:
-        log(f"PDF konnte nicht gerendert werden: {exc}")
-        return False
-    log(f"Drucke an Windows-Drucker {printer_name!r} "
-        f"({image.width}x{image.height} px bei {RENDER_DPI} dpi) ...")
 
-    landscape = image.width > image.height
-    devmode, _applied = (None, False)
-    try:
-        devmode, _applied = _prepare_devmode(
-            printer_name, getattr(cfg, "media", ""), landscape)
-    except Exception as exc:
-        log(f"Hinweis: Treibereinstellungen nicht lesbar ({exc}) – "
-            "Standard des Druckers wird genutzt.")
-        devmode = None
+    target_mm = getattr(cfg, "target_mm", None)
+    if not isinstance(target_mm, (tuple, list)):
+        target_mm = None  # nur eingepasste (fertige) Etiketten-Seiten nutzen Custom-Size
 
-    try:
-        hdc = win32gui.CreateDC("WINSPOOL", printer_name, devmode)
-    except Exception as exc:
-        log(f"Drucker-DC mit Treibereinstellungen fehlgeschlagen ({exc}) – "
-            "zweiter Versuch mit Standardeinstellungen.")
+    def create_dc(devmode):
         try:
-            hdc = win32gui.CreateDC("WINSPOOL", printer_name, None)
-        except Exception as exc2:
-            log(f"Drucker {printer_name!r} nicht erreichbar: {exc2}")
+            return win32ui.CreateDCFromHandle(
+                win32gui.CreateDC("WINSPOOL", printer_name, devmode))
+        except Exception as exc:
+            if devmode is not None:
+                log(f"Drucker-DC mit Treibereinstellungen fehlgeschlagen ({exc}) – "
+                    "zweiter Versuch mit Standardeinstellungen.")
+                try:
+                    return win32ui.CreateDCFromHandle(
+                        win32gui.CreateDC("WINSPOOL", printer_name, None))
+                except Exception as exc2:
+                    log(f"Drucker {printer_name!r} nicht erreichbar: {exc2}")
+            else:
+                log(f"Drucker {printer_name!r} nicht erreichbar: {exc}")
+            return None
+
+    def devmode_for(use_target):
+        landscape_hint = use_target is not None and use_target[0] > use_target[1]
+        try:
+            return _prepare_devmode(printer_name, getattr(cfg, "media", ""),
+                                    landscape_hint, use_target)
+        except Exception as exc:
+            log(f"Hinweis: Treibereinstellungen nicht lesbar ({exc}) – "
+                "Standard des Druckers wird genutzt.")
+            return (None, False)
+
+    dc = None
+    try:
+        # 1) DEVMODE: bevorzugt Custom-Size = exakte Zielgröße
+        devmode, _applied = devmode_for(target_mm)
+        dc = create_dc(devmode)
+        if dc is None:
             return False
 
-    dc = win32ui.CreateDCFromHandle(hdc)
-    try:
+        # 2) Seitengröße gegen Ziel prüfen (Treiber könnte Size verwerfen)
+        if target_mm:
+            page_w, page_h = _page_size_mm(dc)
+            if page_w is None or abs(page_w - target_mm[0]) > 1.0 or \
+                    abs(page_h - target_mm[1]) > 1.0:
+                log(f"Hinweis: Treiber akzeptiert Custom-Size nicht "
+                    f"(Seite {page_w}x{page_h} statt {target_mm[0]}x{target_mm[1]} mm) – "
+                    "Fallback auf Papierformat des Treibers.")
+                dc.DeleteDC()
+                devmode, _applied = devmode_for(None)
+                dc = create_dc(devmode)
+                if dc is None:
+                    return False
+
+        # 3) In Drucker-nativer Auflösung rendern (Thermo: Supersample +
+        #    BOX-Downsampling + Schwellwert → harte, vollere Pixel)
+        dpi = max(150, dc.GetDeviceCaps(win32con.LOGPIXELSX) or RENDER_DPI)
+        try:
+            image = render_pdf_thermal(pdf_path, dpi)
+        except Exception as exc:
+            log(f"PDF konnte nicht gerendert werden: {exc}")
+            return False
+        log(f"Drucke an Windows-Drucker {printer_name!r} "
+            f"({image.width}x{image.height} px bei {dpi} dpi) ...")
+
         dc.StartDoc(f"DHL-Etikett – {Path(pdf_path).name}")
         dc.StartPage()
         try:
@@ -350,14 +442,21 @@ def print_pdf_windows(pdf_path, cfg):
             area_h = dc.GetDeviceCaps(win32con.VERTRES)
             if phys_w <= 0 or phys_h <= 0:
                 raise RuntimeError(f"Drucker meldet keine Seitengröße ({phys_w}x{phys_h})")
-            # Uniform einpassen in den druckbaren Bereich (kein Verzerren!).
-            # Der druckbare Bereich liegt bei (PHYSICALOFFSETX/Y) – dort
-            # zentrieren, nicht innerhalb des physischen Blattes.
+            # Uniform einpassen (kein Verzerren!). Sonderfall: Bild == Seitengröße
+            # (natives Rendering der exakten Etikettenseite) → 1:1 am Seiten-
+            # ursprung zeichnen, dann entspricht der Druck exakt der PDF-Geometrie.
+            # Sonst: auf der PHYSISCHEN Seite zentrieren, innerhalb des
+            # druckbaren Bereichs geklemmt.
             x, y, w, h = fit_rect(image.width, image.height, area_w, area_h)
+            if image.width == phys_w and image.height == phys_h:
+                dest = (0, 0, phys_w, phys_h)
+            else:
+                x = min(max((phys_w - w) / 2.0 - off_x, 0.0), max(0.0, area_w - w))
+                y = min(max((phys_h - h) / 2.0 - off_y, 0.0), max(0.0, area_h - h))
+                dest = (int(off_x + x), int(off_y + y),
+                        int(off_x + x + w), int(off_y + y + h))
             dib = ImageWin.Dib(image)
-            dib.draw(dc.GetHandleOutput(), (
-                int(off_x + x), int(off_y + y),
-                int(off_x + x + w), int(off_y + y + h)))
+            dib.draw(dc.GetHandleOutput(), dest)
         finally:
             dc.EndPage()
         dc.EndDoc()
@@ -370,7 +469,8 @@ def print_pdf_windows(pdf_path, cfg):
         return False
     finally:
         try:
-            dc.DeleteDC()
+            if dc is not None:
+                dc.DeleteDC()
         except Exception:
             pass
     log("Druckauftrag an den Drucker übergeben.")
@@ -444,7 +544,7 @@ def release_watch_lock():
 def _shortcut_target():
     """(Ziel, Argumente, Icon, Arbeitsverzeichnis) für die Autostart-Verknüpfung."""
     if getattr(sys, "frozen", False):  # PyInstaller-EXE
-        exe = Path(sys.executable).resolve()
+        exe = installed_exe_path() or Path(sys.executable).resolve()
         return str(exe), "watch", str(exe), str(exe.parent)
     base = Path(__file__).resolve().parent
     pythonw = Path(sys.executable).parent / "pythonw.exe"
@@ -452,6 +552,42 @@ def _shortcut_target():
     icon = base / "icon.ico"
     return (str(interpreter), f'"{base / "dhl_label.py"}" watch',
             str(icon) if icon.exists() else str(interpreter), str(base))
+
+
+def install_dir():
+    """Installationsordner der EXE: %LOCALAPPDATA%\\DHL-Etiketten."""
+    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+    return Path(base) / "DHL-Etiketten"
+
+
+def install_exe_copy():
+    """Kopiert die laufende (frozen) EXE in den Installationsordner, damit die
+    Autostart-Verknüpfung nicht auf Downloads/Desktop zeigt. Kopiert nur bei
+    geänderter Größe (Update). → Pfad der installierten EXE oder None."""
+    if not getattr(sys, "frozen", False):
+        return None
+    try:
+        import shutil
+
+        source = Path(sys.executable)
+        target_dir = install_dir()
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / source.name
+        if (not target.exists()
+                or target.stat().st_size != source.stat().st_size):
+            shutil.copy2(source, target)
+        return target
+    except Exception:
+        return None
+
+
+def installed_exe_path():
+    """Installierte EXE (falls vorhanden) – bevorzugtes Autostart-Ziel."""
+    if getattr(sys, "frozen", False):
+        candidate = install_dir() / Path(sys.executable).name
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def create_autostart_shortcut():

@@ -1,75 +1,67 @@
 # Status & offene Aufgaben
 
 > Agenten: **Diese Datei zuerst lesen** und nach erledigten Aufgaben aktualisieren
-> (inkl. Datum). Letzte Aktualisierung: 2026-11-01.
+> (inkl. Datum). Letzte Aktualisierung: 2026-11-03.
 
-## Aktueller Stand: Mint-Code fertig + Windows-11-Support implementiert, wartet auf echte Tests
+## Aktueller Stand: Windows 11 am echten Drucker verifiziert + eingerichtet
 
-`origin/main` = Siehe git log (Windows-Support als neuer Commit). Repo **öffentlich**.
+`origin/main` = git log. Repo **öffentlich**.
 
-### Windows 11 (neu, 01.11.2026)
+### Realer Hardware-Test Windows (03.11.2026, SN 420B/Vretti, USB) ✓
 
-- **Druck-Backend Windows**: `win_backend.py` – GDI-Rasterdruck via
-  pypdfium2 (600 dpi) + Pillow ImageWin + win32print/win32ui; Papierformat
-  aus Treiberliste gematcht (exakt → fuzzy), Orientation automatisch,
-  Uniform-Scale-Einpassung in den druckbaren Bereich (Barcode-Scannbarkeit).
-- **tkinter-Setup-GUI** (`setup_gui_win.py`): Drucker + Papierformat
-  (Windows-API), Etikettengröße, Zuschnitt mm, Watch-Modus/Ordner/Filter,
-  Marke-Position, Autostart-Checkbox; „✓ Bereits installiert“ mit
-  Vorbefüllung + „Einstellungen aktualisieren“ + Deinstallieren;
-  GUI-Kalibrierung (Variante 1/2/3/5/6, jeder Testdruck nur nach
-  Bestätigung; Variante 4 = Ghostscript nur Linux).
-- **Watcher** unter Windows: Einzelinstanz-Lock (kein Doppeldruck),
-  Log nach `%LOCALAPPDATA%\dhl-label\dhl-label.log`, Autostart via
-  Startmenü-Autostart-Verknüpfung (kein Admin nötig).
-- **Auslieferung**: `dhl-label.exe` (PyInstaller onefile/windowed, Doppelklick
-  = Setup-GUI), CI `windows-build.yml` baut bei jedem Push (Tests unter Linux
-  **und** Windows), Release-Anhang bei Tag `v*`. requirements-windows.txt.
-- **Tests**: `tests/test_core.py` (15 Tests: Parser, Config-Pfade, write_config
-  BOM-frei, Crop/Compose-Geometrie inkl. Uniform-Scale-Assert + Ecken-Check
-  via Contentstream, Namensfilter, fit_rect, Papier-Match, Windows-API-Probe).
-  Lokal alle grün; GDI-Pipeline bis Treiber-DC lokal verifiziert
-  (StartDoc-Ende bleibt Hardware-Test vorbehalten, "Microsoft Print to PDF"
-  zeigt bei StartDoc einen modalen Dialog → nicht für Auto-Tests nutzbar).
+- Zwei echte DHL-Privatkunden-A4-Paketmarken durch die Pipeline → Testdrucke
+  auf dem SN 420B (4"x6"-Rollen): **funktioniert**.
+- Erkenntnisse/Korrekturen aus dem Echtbetrieb:
+  1. Scheren-Linie am A4-Mittelfalz war im Standard-Crop → jetzt per Zuschnitt
+     entfernt (`trim_top/bottom/left/right_mm`).
+  2. Treiber-Vorgabe „4 x 6" misst 104,23 mm statt 101,6 → Inhalt saß versetzt →
+     **Custom-Size** (`DMPAPER_USER` + PaperWidth/Length = exakt
+     `target_size_mm`) statt Treiber-Papier, wenn Zielgröße gesetzt.
+  3. 1:1-Rendering wirkte „zu dünn" → jetzt **4× Übersampling + BOX-Downsampling
+     + Schwellwert 170** (Schwarz/Weiß) → volle Striche.
+  4. Zentrierung auf der physischen Seite; 1:1-Zeichnung am Seitenursprung,
+     wenn Bild == Seite (Druck == PDF-Geometrie).
+- Finale Kalibrier-Werte (docs/architektur.md §9.3): `trim_top 16.24 /
+  trim_bottom 16.66 / trim_left 3.08 / trim_right 4.13`,
+  `target 101.6x152.4`, `rotate auto`. Druckidentisch gemessen: Rand
+  oben 5,00 / unten 5,13 mm, links/rechts je 13,39 mm, Inhalt 74,9×142,4 mm,
+  Schere weg, Barcode/QR unverzerrt.
+- Nutzer-PC fertig eingerichtet: Config in `%APPDATA%\dhl-label\config.conf`,
+  EXE in `%LOCALAPPDATA%\DHL-Etiketten\dhl-label.exe`, Autostart-Verknüpfung
+  → installierte EXE, Watcher läuft (Downloads-Ordner, Filter
+  `versand|dhl|paket`).
+- Windows-GUI: EXE wird beim „Einrichten" nach `%LOCALAPPDATA%\DHL-Etiketten`
+  installiert (Autostart zeigt auf die Installation, nicht auf Downloads);
+  Zuschnitt-Felder oben/unten/links/rechts.
 
 ### Mint/Linux (unverändert geblieben)
 
-- `setup_gui.py`: GTK3-Formular → install.sh → Log-Streaming → Erfolgsmeldung
-  → GUI-Kalibrierdialog; Installations-Erkennung, Deinstallieren-Knopf.
-  GUI-Kalibrierung nutzt jetzt `gh.default_config_path()`-kompatible
-  Signaturen (`installed_state(path)` etc.) – Verhalten identisch.
-- Windows-Tests grün: py_compile aller Python-Dateien, bash -n, GUI-Logik-Tests.
+- GTK-Setup-GUI, install.sh, systemd-Dienst – Funktionsweise unverändert;
+  neue Config-Schlüssel (`trim_left/right_mm`) sind optionale Defaults (0.0).
+- tests/test_core.py: 16 Tests (inkl. x-Zuschnitt-Region), CI grün auf
+  Linux + Windows.
 
-## Nächster Schritt: Echte Tests
+## Nächster Schritt: Release
 
-1. **Mint-PC** (vom Nutzer, Agent begleitet): ZIP laden → setup-gui.sh →
-   Kalibrierung mit echter DHL-PDF → Alltags-Check. Details wie unten.
-2. **Windows-11-PC**: EXE aus GitHub Release laden (oder lokal gebaute
-   `dist/dhl-label.exe`) → Doppelklick → Vretti per USB verbinden → Setup
-   durchlaufen → Kalibrierung → Alltags-Check (PDF herunterladen → druckt).
-
-### Offene Punkte, die dabei vom Nutzer zu klären sind
-
-- Mint: `lpstat`-Ausgaben, Kalibrier-Variante, Namensfilter vs. echter
-  Dateiname, ggf. `rotate = 270`
-- Windows: Papierformat-Name des Vretti-Treibers (GUI listet ihn vor),
-  Kalibrier-Variante, falls Marke verkehrt herum: `rotate = 270`
+- Tag `v1.1.0` pushen → CI baut die EXE und hängt sie ans GitHub Release an
+  (Nutzer laden von https://github.com/EtwasJonas/dhl-etikettensoftware/releases).
+- Offen vom Nutzer: Alltags-Check auf dem Mint-PC (bisher nur Windows
+  verifiziert); dort gelten die Kalibrier-Werte NICHT automatisch (CUPS-Layout
+  kann abweichen → Kalibrierung vor Ort).
 
 ## Bekannte Restrisiken
 
-1. CUPS-Medianame des Vretti (Mint-GUI liest ihn vor, Nutzer bestätigt).
-2. Windows: Vretti-Treiber muss das Papierformat 100×150 melden – sonst
-   Treiber-Standard (Hinweis steht im Log; im Treiber „Druckereinstellungen“
-   benutzerdefiniertes Format anlegen).
+1. DHL-Layout-Änderungen (Marke verschiebt sich im A4) → Zuschnitt-Werte
+   neu kalibrieren (GUI-Felder) – langfristig: automatische Marker-Erkennung.
+2. Andere Treiber/Papier-Definitionen: Custom-Size deckt Zielgrößen ab;
+   ohne `target_size_mm` greift das Papier-Namensmatch.
 3. pkexec-Passwortdialog im GUI-Kontext (polkit) – falls er nicht erscheint,
    Terminal-Fallback `bash install.sh` dokumentiert.
 4. Windows: SmartScreen-Warnung beim ersten Start der EXE („Trotzdem
-   ausführen“) – dokumentiert im README.
+   ausführen") – dokumentiert im README.
 
 ## Aktive Codetasks: keine
 
-Sobald Hardware-Tests Feedback liefern (Kalibriernummer, Fehlermeldungen,
-`dhl-label.log` bzw. `journalctl --user -u dhl-label`), gezielt fixen.
 **Wichtig**: Uniform-Scale-Assert nicht brechen (Barcode-Scannbarkeit,
 docs/architektur.md §8.3) und Testdruck-Bestätigungen beibehalten.
 
@@ -91,6 +83,8 @@ docs/architektur.md §8.3) und Testdruck-Bestätigungen beibehalten.
 - `448830b` GUI: Deinstallieren-Knopf (Bestätigung, Live-Ausgabe, Zustands-Refresh;
   uninstall.sh wird nach APP_DIR kopiert)
 - `429545c` Stand vor Windows-Support (public-Repo-Umstellung)
-- Windows-Support (01.11.2026): win_backend.py (GDI-Druck, Autostart, Lock),
-  setup_gui_win.py (tkinter), tests/test_core.py, CI-Workflow + PyInstaller-EXE,
-  README/Docs Windows-Kapitel
+- `28a70be`/`2990955` Windows-Support: win_backend.py (GDI-Druck, Autostart, Lock),
+  setup_gui_win.py (tkinter), tests/test_core.py, CI-Workflow + PyInstaller-EXE
+- 03.11.2026: trim_left/right_mm, Custom-Size exakt nach target_size_mm,
+  4×-Übersampling+Schwellwert-Rasterung, 1:1-Zeichnung, EXE-Installation in
+  %LOCALAPPDATA%\DHL-Etiketten, realer Hardware-Test SN 420B bestanden

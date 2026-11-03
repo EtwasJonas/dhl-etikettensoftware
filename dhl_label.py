@@ -104,6 +104,8 @@ class Config:
         self.side = c.get("side", fallback="top").lower()          # top | bottom | full
         self.trim_top_mm = c.getfloat("trim_top_mm", fallback=0.0)
         self.trim_bottom_mm = c.getfloat("trim_bottom_mm", fallback=0.0)
+        self.trim_left_mm = c.getfloat("trim_left_mm", fallback=0.0)
+        self.trim_right_mm = c.getfloat("trim_right_mm", fallback=0.0)
         self.page_index = c.getint("page_index", fallback=0)       # 0 = erste Seite
         self.use_ghostscript = c.getboolean("use_ghostscript", fallback=False)
         self.target_mm = parse_size_mm(c.get("target_size_mm", fallback=""))
@@ -160,7 +162,9 @@ def _crop_region(page, cfg):
 
     y1 -= cfg.trim_top_mm * MM_TO_PT
     y0 += cfg.trim_bottom_mm * MM_TO_PT
-    return left, bottom + y0, left + W, bottom + y1
+    x0 = left + cfg.trim_left_mm * MM_TO_PT
+    x1 = left + W - cfg.trim_right_mm * MM_TO_PT
+    return x0, bottom + y0, x1, bottom + y1
 
 
 def crop_pdf(src, dst, cfg):
@@ -195,15 +199,19 @@ def crop_with_ghostscript(src, dst, cfg):
         y0, y1 = 0.0, H
     y1 -= cfg.trim_top_mm * MM_TO_PT
     y0 += cfg.trim_bottom_mm * MM_TO_PT
+    x0 = cfg.trim_left_mm * MM_TO_PT
+    x1 = W - cfg.trim_right_mm * MM_TO_PT
 
+    width = x1 - x0
     height = y1 - y0
-    # Inhalt nach unten schieben, sodass der gewünschte Streifen am Seitenursprung liegt
+    # Inhalt so schieben, dass der gewünschte Bereich am Seitenursprung liegt
+    offset_x = -x0
     offset_y = -y0
     cmd = [
         "gs", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite",
         "-dFIXEDMEDIA", "-dPDFFitPage",
-        f"-dDEVICEWIDTHPOINTS={W:.2f}", f"-dDEVICEHEIGHTPOINTS={height:.2f}",
-        "-c", f"<</PageOffset [0 {offset_y:.2f}]>> setpagedevice",
+        f"-dDEVICEWIDTHPOINTS={width:.2f}", f"-dDEVICEHEIGHTPOINTS={height:.2f}",
+        "-c", f"<</PageOffset [{offset_x:.2f} {offset_y:.2f}]>> setpagedevice",
         "-sOutputFile", str(dst), "-f", str(src),
     ]
     try:
@@ -218,7 +226,7 @@ def crop_with_ghostscript(src, dst, cfg):
         raise RuntimeError(hint)
     if proc.returncode != 0:
         raise RuntimeError(f"Ghostscript fehlgeschlagen:\n{proc.stderr}")
-    return dst, (0, y0, W, y1)
+    return dst, (x0, y0, x1, y1)
 
 
 def compose_target(src, dst, cfg, target_mm):
@@ -473,6 +481,10 @@ def cmd_crop(args, cfg):
         overrides["trim_top_mm"] = args.trim_top
     if args.trim_bottom is not None:
         overrides["trim_bottom_mm"] = args.trim_bottom
+    if args.trim_left is not None:
+        overrides["trim_left_mm"] = args.trim_left
+    if args.trim_right is not None:
+        overrides["trim_right_mm"] = args.trim_right
     try:
         _, region = make_cropped(args.datei, dst, cfg, force_gs=args.gs, **overrides)
     except Exception as exc:
@@ -659,6 +671,10 @@ def main():
                     help="mm, oben abschneiden")
     cr.add_argument("--trim-bottom", dest="trim_bottom", type=float, default=None,
                     help="mm, unten abschneiden")
+    cr.add_argument("--trim-left", dest="trim_left", type=float, default=None,
+                    help="mm, links abschneiden")
+    cr.add_argument("--trim-right", dest="trim_right", type=float, default=None,
+                    help="mm, rechts abschneiden")
     cr.set_defaults(func=cmd_crop)
 
     pp = sub.add_parser("print-pdf", help="Bereits fertig aufbereitete PDF drucken (ohne Crop)")
