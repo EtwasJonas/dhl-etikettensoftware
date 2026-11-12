@@ -66,8 +66,12 @@ def _append_log_file(line):
                 _LOG_PATH.replace(old)
         except OSError:
             pass
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        parts = str(line).splitlines() or [""]
+        stamped = f"[{stamp}] {parts[0]}" + \
+            ("".join("\n" + p for p in parts[1:]))
         with open(_LOG_PATH, "a", encoding="utf-8", errors="replace") as fh:
-            fh.write(line + "\n")
+            fh.write(stamped + "\n")
     except OSError:
         pass
 
@@ -389,10 +393,31 @@ def watch(cfg, process_existing=False):
     processed_dir = directory / cfg.processed_dirname
     log(f"Überwache {directory} (Modus: {cfg.watch_mode}, "
         f"Filter: {repr(cfg.filename_pattern) if cfg.watch_mode == 'downloads' else 'alle PDFs'})")
+    target = (f"{cfg.target_mm[0]:g}x{cfg.target_mm[1]:g} mm"
+              if getattr(cfg, "target_mm", None) else "aus (nur croppen)")
+    log(f"Einstellungen: Drucker {cfg.printer!r} · Medium {cfg.media!r} · "
+        f"Ziel {target} · Zuschnitt oben/unten/links/rechts = "
+        f"{cfg.trim_top_mm:g}/{cfg.trim_bottom_mm:g}/"
+        f"{cfg.trim_left_mm:g}/{cfg.trim_right_mm:g} mm")
+    # Frühwarnung: wenn der Druckername nicht existiert, landet JEDE PDF nach
+    # 3 Fehlversuchen in fehlgeschlagen/ – das will man sofort im Log sehen.
+    if os.name == "nt":
+        from win_backend import list_printers
+
+        try:
+            printer_names = [name for name, _status in list_printers()]
+        except Exception:
+            printer_names = []
+        if cfg.printer and printer_names and cfg.printer not in printer_names:
+            log(f"ACHTUNG: Der konfigurierte Drucker {cfg.printer!r} ist in "
+                "Windows nicht (mehr) eingerichtet! Verfügbare Drucker: "
+                + (", ".join(printer_names))
+                + "\n→ Im Setup den Drucker wählen und „Einrichten“ klicken.")
 
     pending = {}
     failures = {}
     MAX_RETRIES = 3
+    RETRY_DELAY = 10.0  # Sekunden zwischen zwei Druckversuchen (Drucker/AV Zeit geben)
     known = set()
     if not (process_existing or cfg.process_existing):
         known = {p for p in directory.glob("*.pdf") if matches(p, cfg)}
@@ -406,6 +431,9 @@ def watch(cfg, process_existing=False):
                 continue
             if not matches(pdf, cfg):
                 continue
+            entry = failures.get(pdf)
+            if entry and time.time() < entry[1]:
+                continue  # Pause zwischen Druckversuchen (z.B. Drucker/AV)
             try:
                 size = pdf.stat().st_size
             except FileNotFoundError:
@@ -428,8 +456,7 @@ def watch(cfg, process_existing=False):
                 else:
                     # Druckfehler (z.B. Drucker offline): begrenzt wiederholen,
                     # danach in fehlgeschlagen/ ablegen, damit der Loop nicht endlos spammt
-                    attempts = failures.get(pdf, 0) + 1
-                    failures[pdf] = attempts
+                    attempts = (failures.get(pdf) or (0, 0.0))[0] + 1
                     if attempts >= MAX_RETRIES:
                         failed_dir = directory / "fehlgeschlagen"
                         failed_dir.mkdir(exist_ok=True)
@@ -437,18 +464,21 @@ def watch(cfg, process_existing=False):
                             pdf.replace(failed_dir / pdf.name)
                             log(f"{pdf.name}: nach {attempts} Fehlversuchen nach "
                                 "fehlgeschlagen/ verschoben – manuell nachdrucken "
-                                "mit: dhl-label print")
+                                "mit: dhl-label print (oder GUI: „Manuell drucken…“)")
                             failures.pop(pdf, None)
                         except OSError as exc:
                             log(f"Konnte nicht verschieben: {exc}")
+                            failures[pdf] = (attempts, time.time() + RETRY_DELAY)
                     else:
+                        failures[pdf] = (attempts, time.time() + RETRY_DELAY)
                         log(f"Druck fehlgeschlagen (Versuch {attempts}/{MAX_RETRIES}), "
-                            "wird erneut versucht")
+                            f"nächster Versuch in {RETRY_DELAY:g} Sekunden – "
+                            "Grund siehe Logzeilen darüber")
             else:
                 pending[pdf] = size
         # Stale-Einträge räumen (Datei zwischendurch gelöscht)
         pending = {p: s for p, s in pending.items() if p.exists()}
-        failures = {p: n for p, n in failures.items() if p.exists()}
+        failures = {p: e for p, e in failures.items() if p.exists()}
         time.sleep(cfg.poll_seconds)
 
 

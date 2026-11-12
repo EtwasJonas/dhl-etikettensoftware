@@ -39,12 +39,24 @@ SN 420B/Vretti):
    liegen danach unter `%APPDATA%\dhl-label\config.conf` und die
    Autostart-Verknüpfung im Startmenü-Autostart-Ordner
 
-**Schritt 3 – Kalibrieren (optional, empfohlen):** Nach dem Einrichten
-erscheint der Kalibrier-Dialog: Variante wählen, **jeder Testdruck
-passiert nur nach Bestätigung**, Etikette beschriften und vergleichen.
-Passt eine Variante, die Werte im Setup-Fenster anpassen (Zuschnitt-mm,
-Etikettengröße) und erneut „Einstellungen aktualisieren“ klicken.
-Hinweis: Variante 4 (Ghostscript) gibt es nur unter Linux.
+**Schritt 3 – Watcher & manuelles Drucken:**
+
+- Der Knopf unten links zeigt **jederzeit den Watcher-Status** („Watcher
+  läuft (PID …) – neu starten“ bzw. „Watcher läuft nicht – jetzt
+  starten“) und aktualisiert sich alle 3 Sekunden selbst. Nach
+  „Einrichten“ startet der Watcher automatisch, ohne dass du extra
+  klicken musst.
+- Der Knopf **„Manuell drucken…“** druckt die neueste passende DHL-PDF
+  mit den gespeicherten Einstellungen (inkl. Zuschnitt und
+  Etikettengröße) – genau das Gleiche, was auch der Watcher drucken
+  würde. Gedacht für: eine PDF ist in `fehlgeschlagen/` gelandet, der
+  Drucker war offline oder der Watcher läuft gerade nicht. Gibt es im
+  Watch-Ordner keine passende PDF, darf eine Datei ausgewählt werden.
+
+Die Werks-Kalibrierung passt für das Standard-DHL-A4 auf 4"x6"-Rollen
+(101,6 × 152,4 mm). Falls du trotzdem feinjustieren willst: Werte im
+Setup-Fenster anpassen (Zuschnitt-mm, Etikettengröße) und „Einstellungen
+aktualisieren“ klicken.
 
 Danach läuft der **Watcher** im Hintergrund (startet ab jetzt bei jeder
 Anmeldung selbst). Doppelklick auf die EXE öffnet jederzeit wieder das
@@ -53,7 +65,9 @@ Setup-/Einstellungs-Fenster.
 **Hinweise:**
 
 - Log-Datei: `%LOCALAPPDATA%\dhl-label\dhl-label.log` (die EXE hat keine
-  Konsole – alles landet dort, inkl. Druckfehler)
+  Konsole – alles landet dort, inkl. Druckfehler; jede Zeile mit
+  Datum/Zeit, damit man hinterher nachvollziehen kann, was wann
+  passiert ist)
 - `dhl-label.exe printers` zeigt die Druckerliste in einem Fenster
   (statt Konsole), `show-config` ebenfalls
 - Deinstallieren: EXE öffnen → **„Deinstallieren…“** – entfernt Watcher,
@@ -297,16 +311,27 @@ lp -d Vretti -o media=4x6 test.pdf    # Druckpfad direkt testen
 Windows:
 
 ```
-%LOCALAPPDATA%\dhl-label\dhl-label.log   # Live-Log (mit Editor öffnen)
+%LOCALAPPDATA%\dhl-label\dhl-label.log   # Live-Log (mit Editor öffnen, Zeilen mit [Datum Uhrzeit])
 dhl-label.exe printers                   # Druckerliste + Papierformate
 ```
 
+- **PDF landet in `fehlgeschlagen/`?** Die Zeilen mit Zeitstempel im Log
+  verraten den Grund, z.B.:
+  - „Der konfigurierte Drucker ‚X' ist in Windows nicht (mehr)
+    eingerichtet“ → im Setup den richtigen Drucker wählen und
+    „Einstellungen aktualisieren“ klicken.
+  - „Drucker-DC … nicht erreichbar“ → Drucker war beim Versuch nicht
+    bereit (USB/WLAN). Der Watcher wartet inzwischen **10 Sekunden
+    zwischen den Versuchen**; danach liegt die PDF in
+    `fehlgeschlagen/` und lässt sich mit dem Knopf **„Manuell
+    drucken…“** (oder `dhl-label print DATEI.pdf`) nachdrucken.
 - Watcher läuft doppelt? Der Watcher schützt sich selbst (zweiter Start
   beendet sich, Lock: `%LOCALAPPDATA%\dhl-label\watcher.lock`).
 - Drucker fehlt in der Liste: USB-Kabel anstecken/Drucker einschalten,
   dann im Setup „Neu laden“.
 - Marke verkehrt herum: in der config.conf `[crop] rotate = 270` setzen
-  (oder Setup erneut ausführen – dort Kalibrierung nutzen).
+  (oder Setup erneut ausführen und dort „Einstellungen aktualisieren“
+  klicken).
 
 GUI startet nicht: `dhl-label-setup` im Terminal ausführen und die
 Meldung lesen (meist fehlt `python3-gi`: `sudo apt install python3-gi`).

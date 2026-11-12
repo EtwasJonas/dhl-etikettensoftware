@@ -83,20 +83,55 @@
 - tests/test_core.py: **20 Tests** (+`load_defaults`-Inhalt, +BOM/LF-Check
   für defaults.conf), lokal grün.
 
+### GUI-Ergonomie + Watcher-Diagnose (12.11.2026, Nutzer-Feedback)
+
+- **Watcher-Knopf zeigt Live-Status**: Text = „Watcher läuft (PID …) –
+  neu starten“ bzw. „Watcher läuft nicht – jetzt starten“, GUI-Timer
+  aktualisiert alle 3 s (`_update_watcher_button`, pausiert bei busy).
+  Klick bei laufendem Watcher = Neustart mit Bestätigung; Start ohne
+  config.conf zeigt jetzt einen verständlichen Fehlerdialog (früher:
+  stiller Exit im Log).
+- **„Kalibrieren…“ → „Manuell drucken…“**: druckt die neueste passende
+  DHL-PDF mit den GESPEICHERTEN Einstellungen (= Werks-Werte), Suchfolge
+  Watch-Ordner → `fehlgeschlagen/` → Dateidialog; nach Erfolg Verschiebung
+  nach `gedruckt/` (Doppeldruck-Schutz, wie beim Watcher). Die alten
+  Kalibriervarianten leben als CLI (`dhl-label calibrate`) weiter.
+- **Watcher-Robustheit/Diagnose** (Ursache für „PDFs landen direkt in
+  fehlgeschlagen/“ war am Zweit-PC nicht aus dem Log lesbar):
+  - Log-Zeilen mit `[YYYY-MM-DD HH:MM:SS]` (Datei-Log Windows, beide
+    Writer: `dhl_label._append_log_file` + `win_backend.append_log_file`).
+  - Watcher protokolliert beim Start die **effektive Config** (Drucker,
+    Medium, Zielgröße, Zuschnitte) und **warnt**, wenn der konfigurierte
+    Drucker in Windows nicht existiert (häufigste Ursache nach
+    Config-Kopierverschieben).
+  - **Retry-Pause 10 s** zwischen Druckversuchen (früher ~4 s per Poll);
+    3 Versuche ~24 s statt ~12 s – AV-Scans/warm werdende Drucker.
+  - `kill_watcher()` wartet (bis 6 s) bis zum Prozess-Ende, damit ein
+    sofort neu gesponnter Watcher den Lock nicht fälschlich für belegt
+    hält und sich still beendet (Race bei „Einstellungen aktualisieren“).
+  - „Einrichten“ startet den Watcher jetzt auch dann, wenn er nicht lief.
+- tests/test_core.py: unverändert 20 Tests; GUI-Smoketest erweitert
+  (Status-Knopf-Text, `manual_print`/kein `calibrate`, `_move_processed`,
+  Log-Zeitstempel) – grün. Lokale EXE-Build-Verifikation siehe Commit.
+
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
-- **Release v1.1.0 ist live** (03.11.2026): `dhl-label.exe` hängt am Release
-  (https://github.com/EtwasJonas/dhl-etikettensoftware/releases), gebaut von CI
-  aus `b3d30f0`. Hinweis: Workflow-Berechtigung `contents: write` nachgereicht
-  (`cc09cc0`) – bei zukünftigen Tags `v*` baut + hängt CI die EXE automatisch an.
-  → **Neue Version mit defaults.conf als `v1.2.0` releasen** (siehe oben).
+- **Release v1.2.0 ist live** (12.11.2026, defaults.conf/Werks-Kalibrierung).
+  Für die GUI/Watcher-Änderungen von heute ggf. **v1.2.1 taggen** (CI baut +
+  hängt die EXE automatisch an; Nutzer installiert vom Release).
+- **Watcher-Fehler am Zweit-PC ungeklärt**: Nutzer-Test dort – GUI-Testdruck
+  ok, aber PDFs landeten direkt in `fehlgeschlagen/`. Auf dem Dev-PC keine
+  Spur (keine DHL-PDFs/Ordner heute). Mit dem neuen Build ist die Ursache
+  im Log sichtbar (Zeitstempel + effektive Config + Drucker-Warnung).
+  → Log des Zweit-PCs ansehen (`%LOCALAPPDATA%\dhl-label\dhl-label.log`),
+  dann neuen Test mit v1.2.1-EXE fahren.
 - **Offene Entscheidung (Nutzer):** Linux-Qualität angleichen (**Option B**)?
   Eigene Rasterung auf Linux (pypdfium2/Pillow als neue Linux-Deps, gerastertes
   Schwarz/Weiß-PDF via lp) – erst nach dem ersten echten Mint-Test entscheiden,
   ob CUPS nicht ohnehin gut genug druckt. **Option A (trims auf Linux) ist
   erledigt** (siehe oben) und bekommt die Werks-Werte jetzt automatisch.
-- **Alltagsbetrieb Windows läuft** (Watcher auf dem Nutzer-PC aktiv,
-  EXE installiert unter `%LOCALAPPDATA%\DHL-Etiketten\`).
+- **Dev-PC:** Watcher läuft (alte v1.1.0-EXE als Dienst, neue Config) – beim
+  nächsten „Einrichten“ mit der neuen EXE wird sie ersetzt (install_exe_copy).
 - **Mint-PC:** erster echter Test + Endkalibrierung vor Ort – die Werks-Kalibrierung
   wird dort als Vorbefüllung mitgeliefert, aber das Druckergebnis durch CUPS
   (Media/Ränder) muss einmal geprüft/feinjustiert werden.

@@ -13,7 +13,7 @@
 | `uninstall.sh` | Entfernt Service, Dateien, Icons, Config. Wird von install.sh zusätzlich nach APP_DIR kopiert (GUI kann aus installierter Kopie deinstallieren). |
 | `dhl-label.service` | systemd-User-Unit, `ExecStart=%h/.local/bin/dhl-label watch`, `Restart=on-failure`, `WantedBy=default.target`. |
 | `win_backend.py` | Windows-Backend: GDI-Druckpfad (pypdfium2 + Pillow + win32print/win32ui), Drucker-/Papierformate, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Stdlib (auch unter Linux importierbar). |
-| `setup_gui_win.py` | Windows-Setup-Assistent (tkinter): Formular → config.conf direkt schreiben → Autostart-Verknüpfung → GUI-Kalibrierung (Variante 4 nur Linux). |
+| `setup_gui_win.py` | Windows-Setup-Assistent (tkinter): Formular → config.conf direkt schreiben → Autostart-Verknüpfung → Manueller Druck (gespeicherte Einstellungen, inkl. fehlgeschlagen/-Fallback) → Watcher-Knopf mit Live-Status (3-s-Refresh). |
 | `dhl-label-win.spec` | PyInstaller-Spec → `dist/dhl-label.exe` (onefile, windowed, icon.ico). |
 | `defaults.conf` | Werks-Kalibrierung (verifiziert am SN 420B): side/trims/target_size_mm/rotate. Werden von allen Setups als Vorbefüllung gelesen (Windows-GUI, GTK-GUI, install.sh); EXE bündelt die Datei. Bestehende config.conf bleiben unangetastet. |
 | `.github/workflows/windows-build.yml` | CI: Tests (Linux+Windows), EXE-Build, Release-Anhang bei Tag `v*`. |
@@ -149,7 +149,7 @@ GUI-Kalibriervarianten inkl. Variante 4 mit `--target ""` (GS ohne compose).
 | Datei | Rolle |
 |---|---|
 | `win_backend.py` | Windows-Backend: GDI-Druckpfad, Drucker-/Papierformate via Druck-API, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Standardbibliothek (auch unter Linux importierbar für Tests). |
-| `setup_gui_win.py` | Setup-Assistent für Windows (tkinter; GTK3 ist unter Windows nicht praktikabel). Schreibt Config direkt, richtet Autostart ein, GUI-Kalibrierung (Variante 1/2/3/5/6; Variante 4 = Ghostscript nur Linux). |
+| `setup_gui_win.py` | Setup-Assistent für Windows (tkinter; GTK3 ist unter Windows nicht praktikabel). Schreibt Config direkt, richtet Autostart ein, startet den Watcher nach „Einrichten“ automatisch (bzw. startet einen laufenden neu – kill_watcher wartet bis zum Prozess-Ende), Knopf „Manuell drucken…“ (neueste passende PDF mit gespeicherter Config drucken, Fallback fehlgeschlagen/, danach Verschieben nach gedruckt/), Watcher-Knopf mit Live-Status. Kalibriervarianten via CLI (`dhl-label calibrate`). |
 | `dhl-label-win.spec` | PyInstaller-Spec → `dist/dhl-label.exe` (onefile, windowed, icon.ico). |
 | `.github/workflows/windows-build.yml` | CI: Tests auf Linux + Windows, PyInstaller-Build, Upload-Artefakt, Release-Anhang bei Tag `v*`. |
 | `requirements-windows.txt` | pypdf, pypdfium2, Pillow, pywin32. |
@@ -208,8 +208,23 @@ Schere weg, Uniform-Scale (Barcode scannbar), keine Verzerrung.
   (verhindert Doppeldruck).
 - Autostart = `.lnk` im Startmenü-Autostart-Ordner (kein Admin): Ziel = EXE
   (`watch`-Argument) bzw. `pythonw.exe dhl_label.py watch` im Dev-Fall.
-  GUI-Checkbox steuert Anlegen/Entfernen; „Watcher jetzt starten“ spawn't
-  detached (`DETACHED_PROCESS`).
+  GUI-Checkbox steuert Anlegen/Entfernen; der Watcher-Knopf spawn't
+  detached (`DETACHED_PROCESS`) – bei laufendem Watcher: Neustart mit
+  Bestätigung; `kill_watcher()` wartet (bis 6 s), bis der Prozess wirklich
+  weg ist, damit der Nachfolger den Lock nicht für „belegt“ hält. Nach
+  „Einrichten“ läuft der Watcher automatisch (gestartet oder neu gestartet).
+- Watcher-Knopf zeigt Live-Status („läuft (PID …)“/„läuft nicht“),
+  GUI-interner 3-s-Timer (`_update_watcher_button`), pausiert bei `busy`.
+- **Diagnose:** Log-Zeilen tragen `[YYYY-MM-DD HH:MM:SS]` (Datei-Log in
+  `dhl_label._append_log_file` und `win_backend.append_log_file`). Der
+  Watcher protokolliert beim Start die effektive Config (Drucker, Medium,
+  Zielgröße, Zuschnitte) und warnt laut, wenn der konfigurierte Drucker
+  in Windows nicht existiert (häufigste Ursache für
+  fehlgeschlagen/-Landungen nach Config-Kopierverschieben).
+- **Retry-Pause:** nach einem Druckfehler wartet der Watcher 10 s
+  (`RETRY_DELAY`), bevor der nächste Versuch startet (früher: nächster
+  Poll ≈ 4 s) – gibt AV-Scans/warm werdenden Druckern Zeit; erst nach
+  3 Fehlversuchen wandert die PDF nach `fehlgeschlagen/`.
 - Konfigurationidentisch zur Linux-Struktur; `processed_dirname = gedruckt`
   etc. funktionieren unverändert (pathlib).
 

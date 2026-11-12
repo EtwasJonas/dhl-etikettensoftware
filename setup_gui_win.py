@@ -13,8 +13,10 @@ Ablauf:
   2) „Einrichten“ → schreibt %APPDATA%/dhl-label/config.conf, richtet die
      Autostart-Verknüpfung im Startmenü-Autostart-Ordner ein (kein Admin
      nötig) und startet einen laufenden Watcher mit den neuen Werten neu
-  3) Kalibrieren: Testdrucke (Variante 1/2/3/5/6) – jeder Druck passiert
-     nur nach Bestätigung; Variante 4 (Ghostscript) gibt es nur unter Linux
+  3) „Manuell drucken…“ → druckt die neueste passende DHL-PDF mit den
+     gespeicherten Einstellungen (z.B. falls der Watcher nicht läuft oder
+     eine PDF in fehlgeschlagen/ gelandet ist)
+  4) Watcher-Knopf zeigt jederzeit den Status (läuft/gestoppt, mit PID)
 
 Start: `dhl-label setup` bzw. Doppelklick auf die EXE (ohne Argument öffnet
 die EXE dieses Fenster). Erneut einrichten zeigt „✓ Bereits installiert“
@@ -37,17 +39,6 @@ from tkinter import ttk, messagebox, filedialog
 
 DEFAULT_PATTERN = "versand|dhl|paket"
 
-# Kalibriervarianten (ohne Variante 4 – Ghostscript nur unter Linux)
-CALIBRATION_VARIANTS = [
-    ("1: obere Hälfte exakt", {}),
-    ("2: 5 mm oben abgeschnitten", {"trim_top_mm": 5.0}),
-    ("3: 5 mm unten abgeschnitten", {"trim_bottom_mm": 5.0}),
-    ("5: gedreht + exakt auf 100x150 mm eingepasst",
-     {"target_mm": "100x150", "rotate": "auto"}),
-    ("6: gedreht + exakt auf 101,6x152,4 mm (4\"x6\") eingepasst",
-     {"target_mm": "101.6x152.4", "rotate": "auto"}),
-]
-
 
 def base_dir():
     """Repo- bzw. entpackte-EXE-Ordner (für icon.ico)."""
@@ -68,6 +59,7 @@ class SetupWindow:
         self.printers = []
         self.installed_cfg = None
         self._action_buttons = []
+        self._watcher_state = None
 
         self._build_ui()
         ok, problems = gh.check_environment()
@@ -77,6 +69,7 @@ class SetupWindow:
                 self._log("  - " + problem)
         self.refresh_state()
         self.load_printers_async()
+        self._update_watcher_button()
 
     # ------------------------------------------------------------ UI-Aufbau
 
@@ -254,10 +247,11 @@ class SetupWindow:
         self.save_btn = ttk.Button(buttons, text="Einrichten", command=self.save)
         self.save_btn.pack(side="left")
         self._action_buttons.append(self.save_btn)
-        self.calib_btn = ttk.Button(buttons, text="Kalibrieren…", command=self.calibrate)
-        self.calib_btn.pack(side="left", padx=(8, 0))
-        self._action_buttons.append(self.calib_btn)
-        self.start_btn = ttk.Button(buttons, text="Watcher jetzt starten",
+        self.print_manual_btn = ttk.Button(buttons, text="Manuell drucken…",
+                                           command=self.manual_print)
+        self.print_manual_btn.pack(side="left", padx=(8, 0))
+        self._action_buttons.append(self.print_manual_btn)
+        self.start_btn = ttk.Button(buttons, text="Watcher: Status wird geprüft …",
                                     command=self.start_watcher_now)
         self.start_btn.pack(side="left", padx=(8, 0))
         self._action_buttons.append(self.start_btn)
@@ -465,9 +459,14 @@ class SetupWindow:
                     win_backend.spawn_watch_detached()
                     self._ui(self._log,
                              "Watcher lief bereits → mit neuen Einstellungen neu gestartet.")
+                else:
+                    win_backend.spawn_watch_detached()
+                    self._ui(self._log,
+                             "Watcher lief nicht → jetzt gestartet "
+                             "(ob er bei jeder Anmeldung startet, regelt die Autostart-Option oben).")
                 self._ui(self._log, "Fertig – ab jetzt wird automatisch gedruckt.")
                 self._ui(self.refresh_state)
-                self._ui(self._ask_calibrate)
+                self._ui(self._ask_manual_print)
             except Exception as exc:
                 self._ui(self._log, f"Fehler beim Einrichten: {exc}")
                 self._ui(lambda: messagebox.showerror("Fehler", str(exc)))
@@ -475,30 +474,184 @@ class SetupWindow:
                 self._ui(self._set_busy, False)
         threading.Thread(target=work, daemon=True).start()
 
-    def _ask_calibrate(self):
+    def _ask_manual_print(self):
         if messagebox.askyesno(
                 "Einrichten abgeschlossen",
                 "Die Einstellungen sind gespeichert.\n\n"
-                "Jetzt kalibrieren? Es werden ein bis fünf Testdrucke gemacht –\n"
-                "jeder Druck passiert nur nach deiner Bestätigung.\n\n"
-                "(Später anytime über „Kalibrieren…“ möglich.)"):
-            self.calibrate()
+                "Jetzt eine DHL-Marke manuell drucken? (braucht eine passende "
+                "DHL-PDF im Watch-Ordner – sonst kannst du eine Datei auswählen.)"):
+            self.manual_print()
+
+    # ------------------------------------------------------------ Manueller Druck
+
+    def manual_print(self):
+        """Druckt die neueste passende DHL-PDF mit den GESPEICHERTEN
+        Einstellungen (inkl. Zuschnitt/Etikettengröße) – für den Fall, dass
+        der Watcher gerade nicht druckt oder eine PDF in fehlgeschlagen/
+        gelandet ist. Gibt es nichts Passendes, darf eine Datei gewählt werden."""
+        if self.busy:
+            return
+        config_path = gh.default_config_path()
+        if not config_path.exists():
+            messagebox.showerror(
+                "Manueller Druck",
+                "Bitte zuerst „Einrichten“ – es gibt noch keine gespeicherten "
+                "Einstellungen.")
+            return
+        try:
+            cfg = dhl_label.Config(config_path)
+        except SystemExit as exc:
+            messagebox.showerror("Manueller Druck", str(exc))
+            return
+        probe = SimpleNamespace(watch_mode=cfg.watch_mode,
+                                filename_pattern=cfg.filename_pattern)
+        src = dhl_label.newest_matching(cfg.watch_dir, probe)
+        if src is None:
+            failed_dir = Path(cfg.watch_dir) / "fehlgeschlagen"
+            if failed_dir.is_dir():
+                src = dhl_label.newest_matching(failed_dir, probe)
+                if src is not None:
+                    self._log(f"Keine PDF im Watch-Ordner – nehme die neueste "
+                              f"aus fehlgeschlagen/: {src.name}")
+        if src is None:
+            src = filedialog.askopenfilename(
+                title="DHL-PDF für den manuellen Druck wählen",
+                initialdir=str(cfg.watch_dir),
+                filetypes=[("PDF-Dateien", "*.pdf"), ("Alle Dateien", "*.*")])
+            if not src:
+                return
+        src = Path(src)
+        if not messagebox.askyesno(
+                "Manueller Druck",
+                f"Jetzt drucken?\n\n"
+                f"Datei: {src.name}\n"
+                f"Drucker: {cfg.printer}\n\n"
+                "(Es gelten die gespeicherten Einstellungen – inkl. "
+                "Zuschnitt und Etikettengröße.)"):
+            return
+        self._set_busy(True)
+        self._log(f"Manueller Druck: {src.name} an Drucker {cfg.printer!r} …")
+
+        def work():
+            try:
+                tmp = Path(tempfile.gettempdir()) / (src.stem + ".manual.pdf")
+                try:
+                    dhl_label.make_cropped(src, tmp, cfg)
+                except Exception as exc:
+                    self._ui(self._log, f"Aufbereitung fehlgeschlagen: {exc}")
+                    self._ui(lambda: messagebox.showerror(
+                        "Manueller Druck",
+                        f"Aufbereitung fehlgeschlagen:\n{exc}\n\n"
+                        "(Datei beschädigt oder noch im Download? Einen Moment "
+                        "warten und erneut versuchen.)"))
+                    return
+                ok = dhl_label.print_pdf(tmp, cfg)
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                if ok:
+                    self._ui(self._log, "Gedruckt – Etikette beschriften!")
+                    moved = self._move_processed(src, cfg)
+                    if moved:
+                        self._ui(self._log, f"PDF verschoben nach: {moved} "
+                                 "(verhindert Doppeldruck)")
+                    self._ui(lambda: messagebox.showinfo(
+                        "Manueller Druck", "Das Etikett wurde an den Drucker "
+                        "übergeben."))
+                else:
+                    self._ui(self._log,
+                             "Druck fehlgeschlagen – den Grund siehst du in der "
+                             "Log-Datei: %LOCALAPPDATA%\\dhl-label\\dhl-label.log "
+                             "(mit Zeitstempeln).")
+                    self._ui(lambda: messagebox.showerror(
+                        "Manueller Druck",
+                        "Der Druck ist fehlgeschlagen.\n\nGrund: Log-Datei "
+                        "%LOCALAPPDATA%\\dhl-label\\dhl-label.log öffnen "
+                        "(letzte Zeilen mit [Datum Uhrzeit])."))
+            finally:
+                self._ui(self._set_busy, False)
+        threading.Thread(target=work, daemon=True).start()
+
+    @staticmethod
+    def _move_processed(src, cfg):
+        """Verschiebt eine erfolgreich manuell gedruckte PDF nach gedruckt/
+        (gleiche Semantik wie der Watcher → kein Doppeldruck), wenn sie im
+        Watch-Ordner oder in fehlgeschlagen/ liegt. → Zielpfad oder None."""
+        watch = Path(cfg.watch_dir)
+        failed = watch / "fehlgeschlagen"
+        src = Path(src)
+        try:
+            in_watch = src.parent == watch
+            in_failed = src.parent == failed
+            if not (in_watch or in_failed):
+                return None
+            target_dir = watch / cfg.processed_dirname
+            target_dir.mkdir(exist_ok=True)
+            target = target_dir / src.name
+            src.replace(target)
+            return target
+        except OSError:
+            return None
 
     # ------------------------------------------------------------ Watcher
+
+    def _update_watcher_button(self):
+        """Hält den Watcher-Knopf auf dem aktuellen Stand (alle 3 Sekunden),
+        damit man ohne Klick sieht, ob er läuft. Landet die Aktualisierung
+        mitten in einer Aktion (busy), wird nur der nächste Tick geplant."""
+        if not self.busy:
+            running, pid = win_backend.watcher_running()
+            state = (bool(running), pid if running else None)
+            if state != self._watcher_state:
+                self._watcher_state = state
+                if running:
+                    self.start_btn.configure(
+                        text=f"Watcher läuft (PID {pid}) – neu starten")
+                else:
+                    self.start_btn.configure(
+                        text="Watcher läuft nicht – jetzt starten")
+        self.root.after(3000, self._update_watcher_button)
 
     def start_watcher_now(self):
         if self.busy:
             return
         running, pid = win_backend.watcher_running()
         if running:
-            messagebox.showinfo("Watcher", f"Der Watcher läuft bereits (PID {pid}).")
-            return
-        try:
-            win_backend.spawn_watch_detached()
-            self._log("Watcher gestartet – läuft im Hintergrund.")
-        except Exception as exc:
-            self._log(f"Watcher konnte nicht gestartet werden: {exc}")
-            messagebox.showerror("Fehler", str(exc))
+            if not messagebox.askyesno(
+                    "Watcher neu starten",
+                    f"Der Watcher läuft bereits (PID {pid}).\n\n"
+                    "Neu starten? Er übernimmt dann die gespeicherten "
+                    "Einstellungen (z.B. nach Änderungen nötig)."):
+                return
+            action = "restart"
+        else:
+            if not gh.default_config_path().exists():
+                messagebox.showerror(
+                    "Watcher starten",
+                    "Es gibt noch keine gespeicherten Einstellungen.\n\n"
+                    "Bitte zuerst „Einrichten“ klicken – erst dann hat der "
+                    "Watcher Drucker und Zuschnitt-Werte, mit denen er drucken kann.")
+                return
+            action = "start"
+        self._set_busy(True)
+        self._log("Watcher wird gestartet …" if action == "start"
+                  else "Watcher wird neu gestartet …")
+
+        def work():
+            try:
+                if action == "restart":
+                    win_backend.kill_watcher()
+                win_backend.spawn_watch_detached()
+                self._ui(self._log,
+                         "Watcher gestartet – Status sieht du am Knopf "
+                         "(aktualisiert sich alle 3 Sekunden).")
+            except Exception as exc:
+                self._ui(self._log, f"Watcher konnte nicht gestartet werden: {exc}")
+                self._ui(lambda: messagebox.showerror("Fehler", str(exc)))
+            finally:
+                self._ui(self._set_busy, False)
+        threading.Thread(target=work, daemon=True).start()
 
     # ------------------------------------------------------------ Deinstall
 
@@ -541,111 +694,6 @@ class SetupWindow:
             finally:
                 self._ui(self._set_busy, False)
         threading.Thread(target=work, daemon=True).start()
-
-    # ------------------------------------------------------------ Kalibrierung
-
-    def calibrate(self):
-        if self.busy:
-            return
-        config_path = gh.default_config_path()
-        if not config_path.exists():
-            messagebox.showerror("Kalibrieren",
-                                 "Bitte zuerst „Einrichten“ – es gibt noch keine "
-                                 "gespeicherten Einstellungen.")
-            return
-        try:
-            cfg = dhl_label.Config(config_path)
-        except SystemExit as exc:
-            messagebox.showerror("Kalibrieren", str(exc))
-            return
-        probe = SimpleNamespace(watch_mode=self.watch_mode_var.get(),
-                                filename_pattern=self.pattern_var.get())
-        src = dhl_label.newest_matching(
-            self.watch_dir_var.get().strip() or str(Path.home() / "Downloads"), probe)
-        if src is None:
-            src = filedialog.askopenfilename(
-                title="DHL-PDF für die Kalibrierung wählen",
-                filetypes=[("PDF-Dateien", "*.pdf"), ("Alle Dateien", "*.*")])
-            if not src:
-                return
-        self._open_calibration_dialog(Path(src), cfg)
-
-    def _open_calibration_dialog(self, src, cfg):
-        win = tk.Toplevel(self.root)
-        win.title("Kalibrierung – Testdrucke")
-        win.transient(self.root)
-        win.grab_set()
-        win.minsize(680, 480)
-
-        ttk.Label(win, text="Kalibrierung", font=("Segoe UI", 12, "bold")).pack(
-            anchor="w", padx=12, pady=(10, 2))
-        ttk.Label(win, text=(
-            f"Quelle: {src.name}\n\n"
-            "Wähle eine Variante und starte einen Testdruck – jeder Druck passiert "
-            "nur nach deiner Bestätigung. Beschrifte jede Etikette mit der "
-            "Varianten-Nummer und vergleiche:\n"
-            "  1/2/3: Bereich exakt bzw. 5 mm zugeschnitten\n"
-            "  5/6: gedreht und exakt auf die Etikettengröße eingepasst "
-            "(empfohlen für 4x6-Rollen)\n\n"
-            "Variante 4 (Ghostscript-Hardcrop) gibt es nur unter Linux.\n"
-            "Passt eine Variante? Trage die Werte im Hauptfenster ein "
-            "(Zuschnitt mm, Etikettengröße); falls die Marke auf dem Kopf "
-            "steht: in der config.conf [crop] rotate = 270 setzen."),
-            wraplength=650, justify="left").pack(anchor="w", padx=12)
-
-        box = ttk.Frame(win, padding=12)
-        box.pack(fill="x")
-        box.columnconfigure(1, weight=1)
-        ttk.Label(box, text="Variante:").grid(row=0, column=0, padx=(0, 8))
-        variant_combo = ttk.Combobox(box, state="readonly", width=48,
-                                     values=[name for name, _ in CALIBRATION_VARIANTS])
-        variant_combo.current(0)
-        variant_combo.grid(row=0, column=1, sticky="w")
-
-        calib_log = tk.Text(win, height=10, wrap="word", state="disabled")
-        calib_log.pack(fill="both", expand=True, padx=12, pady=8)
-
-        def clog(msg):
-            try:
-                calib_log.configure(state="normal")
-                calib_log.insert("end", str(msg).rstrip() + "\n")
-                calib_log.see("end")
-                calib_log.configure(state="disabled")
-            except tk.TclError:
-                pass  # Dialog wurde geschlossen
-
-        buttons = ttk.Frame(win, padding=(12, 0, 12, 12))
-        buttons.pack(fill="x")
-
-        def test_print():
-            desc = variant_combo.get()
-            if not desc:
-                return
-            number = desc.split(":")[0].strip()
-            if not messagebox.askyesno(
-                    "Testdruck", f"{desc}\n\nJetzt drucken?", parent=win):
-                clog(f"Variante {number}: abgebrochen (nicht bestätigt).")
-                return
-            clog(f"Variante {number}: wird erzeugt und gedruckt ...")
-            overrides = dict(CALIBRATION_VARIANTS[
-                [name for name, _ in CALIBRATION_VARIANTS].index(desc)][1])
-            tmp = Path(tempfile.gettempdir()) / "dhl-label-calibrate"
-            tmp.mkdir(exist_ok=True)
-            out = tmp / f"variante{number}.pdf"
-
-            def work():
-                try:
-                    dhl_label.make_cropped(src, out, cfg, **overrides)
-                    ok = dhl_label.print_pdf(out, cfg)
-                    self._ui(clog, f"Variante {number}: "
-                              + ("gedruckt – Etikette beschriften!" if ok
-                                 else "Druck fehlgeschlagen (siehe Protokoll unten)."))
-                except Exception as exc:
-                    self._ui(clog, f"Variante {number}: Fehler – {exc}")
-            threading.Thread(target=work, daemon=True).start()
-
-        ttk.Button(buttons, text="Testdruck starten", command=test_print).pack(side="left")
-        ttk.Button(buttons, text="Fertig", command=win.destroy).pack(side="right")
 
 
 def run():

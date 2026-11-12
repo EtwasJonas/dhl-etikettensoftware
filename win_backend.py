@@ -19,6 +19,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 APP_NAME = "dhl-label"
@@ -325,7 +326,9 @@ def log(msg):
 
 
 def append_log_file(line):
-    """Hängt an %LOCALAPPDATA%\\dhl-label\\dhl-label.log an (max. ~1 MB, dann .old)."""
+    """Hängt an %LOCALAPPDATA%\\dhl-label\\dhl-label.log an (max. ~1 MB, dann .old).
+    Jede Zeile bekommt einen Zeitstempel – ohne den lässt sich ein „wohin ist
+    meine PDF gegangen“ hinterher nicht mehr nachvollziehen."""
     try:
         path = log_file()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,8 +342,12 @@ def append_log_file(line):
                 path.replace(old)
         except OSError:
             pass
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        parts = str(line).splitlines() or [""]
+        stamped = f"[{stamp}] {parts[0]}" + \
+            ("".join("\n" + p for p in parts[1:]))
         with open(path, "a", encoding="utf-8", errors="replace") as fh:
-            fh.write(line + "\n")
+            fh.write(stamped + "\n")
     except OSError:
         pass
 
@@ -622,15 +629,22 @@ def watcher_exe_name():
 
 
 def kill_watcher():
-    """Beendet einen laufenden Watcher (frozen: nach EXE-Name; sonst PID aus Lock)."""
+    """Beendet einen laufenden Watcher (frozen: nach EXE-Name; sonst PID aus Lock).
+    Wartet danach kurz, bis der Prozess wirklich weg ist – sonst kann ein
+    direkt danach gestarteter neuer Watcher denken, der alte lebe noch, und
+    sich sofort wieder beenden (→ kein Watcher, obwohl die GUI „gestartet“
+    meldet)."""
     running, pid = watcher_running()
     if running and pid and pid != os.getpid():
         try:
             subprocess.run(["taskkill", "/PID", str(pid), "/F"],
                            capture_output=True, timeout=15)
-            return True
         except Exception:
+            pass
+        if not _wait_watcher_gone(6.0):
+            log(f"Achtung: Watcher (PID {pid}) ließ sich nicht beenden.")
             return False
+        return True
     if getattr(sys, "frozen", False):
         try:
             subprocess.run(["taskkill", "/IM", watcher_exe_name(), "/F"],
@@ -639,6 +653,18 @@ def kill_watcher():
         except Exception:
             return False
     return False
+
+
+def _wait_watcher_gone(timeout=6.0):
+    """Wartet, bis watcher_running() False meldet (Taskkill braucht einen
+    Moment, bis das-Prozess-Handle komplett weg ist). → True, wenn weg."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        running, _pid = watcher_running()
+        if not running:
+            return True
+        time.sleep(0.2)
+    return not watcher_running()[0]
 
 
 def spawn_watch_detached():
