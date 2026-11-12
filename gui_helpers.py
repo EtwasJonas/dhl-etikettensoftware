@@ -9,9 +9,40 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 MM_TO_PT = 72.0 / 25.4
+
+
+def defaults_file_candidates():
+    """Suchpfade für defaults.conf: EXE-Bundle, Repo-Ordner, Linux-Installation."""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)  # PyInstaller-Entpackordner
+    if meipass:
+        candidates.append(Path(meipass) / "defaults.conf")
+    candidates.append(Path(__file__).resolve().parent / "defaults.conf")
+    candidates.append(Path("~/.local/share/dhl-label/defaults.conf").expanduser())
+    return candidates
+
+
+def load_defaults():
+    """Werks-Defaults (vorkalibriert) aus defaults.conf → dict (Sektion [crop])
+    oder {} falls die Datei fehlt/unlesbar ist. NIE wirft – Setup darf damit
+    Formular-Vorbefüllung machen."""
+    import configparser
+
+    for candidate in defaults_file_candidates():
+        try:
+            if not candidate.exists():
+                continue
+            cp = configparser.ConfigParser()
+            cp.read(str(candidate), encoding="utf-8")
+            if cp.has_section("crop"):
+                return {key: cp["crop"][key] for key in cp["crop"]}
+        except Exception:
+            continue
+    return {}
 
 
 def default_config_path():

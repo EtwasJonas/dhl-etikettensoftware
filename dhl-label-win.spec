@@ -17,7 +17,7 @@ import sys
 
 from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
 
-datas = [("icon.ico", "."), ("icon.png", ".")]
+datas = [("icon.ico", "."), ("icon.png", "."), ("defaults.conf", ".")]
 datas += collect_data_files("pypdfium2")
 
 binaries = collect_dynamic_libs("pypdfium2")

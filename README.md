@@ -22,17 +22,20 @@ https://github.com/EtwasJonas/dhl-etikettensoftware/releases
 ```
 
 **Schritt 2 – Doppelklick auf `dhl-label.exe`** → das Setup-Fenster
-öffnet sich (keine Konsole, kein Python nötig):
+öffnet sich (keine Konsole, kein Python nötig). Die **Werks-Kalibrierung
+ist voreingestellt** (DHL-Privatkunden-A4 + 4"x6"-Rollen: exakt
+101,6×152,4 mm, gleichmäßige Ränder, Scheren-Linie draußen – gemessen am
+SN 420B/Vretti):
 
 1. **Drucker** aus der Liste wählen (USB-Drucker richtet Windows
    automatisch ein; „Neu laden“ aktualisiert die Liste)
 2. **Papierformat** übernehmen (das meldet der Windows-Druckertreiber,
    z.B. „User Defined 100x150mm“)
-3. **Etikettengröße der Rolle** eintragen (meist `100x150` mm)
+3. **Etikettengröße** ist voreingestellt (`101.6x152.4`) – bei anderen
+   Rollen anpassen
 4. **Wann gedruckt** wird: Downloads-Ordner mit Namensfilter
    (`versand|dhl|paket`) oder eigener Watch-Ordner
-5. Position der Marke im A4-PDF (obere/untere Hälfte)
-6. **„Einrichten“** – es gibt keine Admin-Abfrage; die Einstellungen
+5. **„Einrichten“** – es gibt keine Admin-Abfrage; die Einstellungen
    liegen danach unter `%APPDATA%\dhl-label\config.conf` und die
    Autostart-Verknüpfung im Startmenü-Autostart-Ordner
 
@@ -84,10 +87,12 @@ die GUI direkt – kein Terminal.
    verbunden wurde)
 2. **Mediengröße** übernehmen (vorausgewählt ist, was der Drucker
    meldet – meist `4x6`)
-3. **Etikettengröße der Rolle** eintragen (Vretti-Rollen meist `100x150` mm)
-4. **Zusätzlich abschneiden (mm)** – oben/unten/links/rechts, meist alles
-   0 lassen; Kalibrier-Werte trägst du hier oder direkt im Kalibrier-Dialog
-   ein (z.B. um die Scheren-Linie des A4-Bogens zu entfernen)
+3. **Etikettengröße der Rolle**: voreingestellt ist die **Werks-Kalibrierung**
+   (`101.6x152.4` = 4"x6"-Rollen) - bei anderen Rollen anpassen
+4. **Zusätzlich abschneiden (mm)**: voreingestellt ist die Werks-Kalibrierung
+   für das DHL-Privatkunden-A4 (gleichmäßige Ränder, Scheren-Linie des A4-
+   Bogens draußen) - nur anpassen, falls Inhalte abgeschnitten werden; im
+   Kalibrier-Dialog kannst du die Werte auch direkt eintragen
 5. Wählen, **wann gedruckt** wird: Downloads-Ordner mit Namensfilter
    (`versand|dhl|paket`) oder eigener Watch-Ordner (alle PDFs)
 6. Wo die Marke im A4-PDF sitzt: **obere/untere Hälfte**
@@ -241,7 +246,9 @@ Zuschnitt-Felder mit **„Werte speichern“** im Kalibrier-Dialog.
 ## Konfiguration
 
 Linux: `~/.config/dhl-label/config.conf` – Windows:
-`%APPDATA%\dhl-label\config.conf` (gleiche Struktur):
+`%APPDATA%\dhl-label\config.conf` (gleiche Struktur). Die **Werks-Kalibrierung**
+liegt als `defaults.conf` im Programmordner und dient allen Setups als
+Vorbefüllung – bestehende Configs werden dadurch nicht angefasst:
 
 ```ini
 [printer]

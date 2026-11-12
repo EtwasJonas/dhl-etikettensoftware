@@ -74,6 +74,18 @@ norm_trim() {
   fi
   printf '%s' "$value"
 }
+# Werks-Defaults (vorkalibriert) aus defaults.conf: nicht gesetzte
+# --trim-* Flags werden aus der Datei gefüllt; explizit übergebene Werte
+# (auch 0) bleiben unangetastet.
+DEF_CONF="$SRC_DIR/defaults.conf"
+default_from_conf() {
+  [ -f "$DEF_CONF" ] || return 0
+  sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" "$DEF_CONF" | head -n 1
+}
+if [ -z "$FLAG_TRIM_TOP" ];    then FLAG_TRIM_TOP="$(default_from_conf trim_top_mm)";    fi
+if [ -z "$FLAG_TRIM_BOTTOM" ]; then FLAG_TRIM_BOTTOM="$(default_from_conf trim_bottom_mm)"; fi
+if [ -z "$FLAG_TRIM_LEFT" ];   then FLAG_TRIM_LEFT="$(default_from_conf trim_left_mm)";   fi
+if [ -z "$FLAG_TRIM_RIGHT" ];  then FLAG_TRIM_RIGHT="$(default_from_conf trim_right_mm)";  fi
 TRIM_TOP="$(norm_trim "$FLAG_TRIM_TOP")"
 TRIM_BOTTOM="$(norm_trim "$FLAG_TRIM_BOTTOM")"
 TRIM_LEFT="$(norm_trim "$FLAG_TRIM_LEFT")"
@@ -183,9 +195,10 @@ else
   echo "Erklärung: Zusätzlich wird das gecroppte A4-Stück exakt auf die"
   echo "Etikettengröße der Rolle eingepasst (gedreht + skaliert, zentriert)."
   echo "Das sorgt dafür, dass die Marke das komplette Etikett füllt."
-  echo "Der Vretti nutzt meist 100x150-mm-Rollen (synonym mit 4\"x6\")."
-  read -r -p "Etikettengröße der Rolle in mm (Breite x Höhe) [100x150]: " TARGET
-  TARGET="${TARGET:-100x150}"
+  echo "Der Vretti nutzt meist 4\"x6\"-Rollen (synonym 101,6x152,4 mm)."
+  DEF_TARGET="$(default_from_conf target_size_mm)"
+  read -r -p "Etikettengröße der Rolle in mm (Breite x Höhe) [${DEF_TARGET:-100x150}]: " TARGET
+  TARGET="${TARGET:-${DEF_TARGET:-100x150}}"
   if [ "$TARGET" = "-" ]; then TARGET=""; fi
 fi
 info "Ziel-Etikettengröße: ${TARGET:-(nur croppen, Drucker skaliert selbst)}"
@@ -268,6 +281,7 @@ cp "$SRC_DIR/setup_gui.py" "$APP_DIR/"
 cp "$SRC_DIR/install.sh" "$APP_DIR/"   # damit dhl-label-setup (GUI) die GUI erneut ausführen kann
 cp "$SRC_DIR/uninstall.sh" "$APP_DIR/" # damit die GUI auch deinstallieren kann
 cp "$SRC_DIR/icon.png" "$APP_DIR/"     # Fenster-Icon + Desktop-Verknüpfungen
+cp "$SRC_DIR/defaults.conf" "$APP_DIR/" 2>/dev/null || true  # Werks-Defaults (GUI-Vorbefüllung)
 cp "$SRC_DIR/dhl-label.service" "$SYSTEMD_DIR/"
 
 info "Python-virtualenv anlegen und pypdf installieren…"

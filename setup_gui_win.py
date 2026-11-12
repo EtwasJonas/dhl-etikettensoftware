@@ -82,13 +82,15 @@ class SetupWindow:
 
     def _build_ui(self):
         # Tk-Variablen zuerst (keine Walrus-Zuweisungen auf Attribute möglich)
+        _def = gh.load_defaults()
         self.printer_var = tk.StringVar()
         self.paper_var = tk.StringVar()
-        self.target_var = tk.StringVar(value="100x150")
-        self.trim_top_var = tk.StringVar(value="0")
-        self.trim_bottom_var = tk.StringVar(value="0")
-        self.trim_left_var = tk.StringVar(value="0")
-        self.trim_right_var = tk.StringVar(value="0")
+        self.target_var = tk.StringVar(
+            value=_def.get("target_size_mm") or "100x150")
+        self.trim_top_var = tk.StringVar(value=_def.get("trim_top_mm") or "0")
+        self.trim_bottom_var = tk.StringVar(value=_def.get("trim_bottom_mm") or "0")
+        self.trim_left_var = tk.StringVar(value=_def.get("trim_left_mm") or "0")
+        self.trim_right_var = tk.StringVar(value=_def.get("trim_right_mm") or "0")
         self.watch_mode_var = tk.StringVar(value="downloads")
         self.watch_dir_var = tk.StringVar(value=str(Path.home() / "Downloads"))
         self.pattern_var = tk.StringVar(value=DEFAULT_PATTERN)

@@ -126,15 +126,17 @@ class SetupWindow(Gtk.Window):
         row += 1
 
         # --- Etikettengröße ---
+        _def = gh.load_defaults()
         add_label("<b>Etikettengröße der Rolle</b> (mm, Breite x Höhe):", row)
         self.target_entry = Gtk.Entry()
-        self.target_entry.set_text("100x150")
+        self.target_entry.set_text(_def.get("target_size_mm") or "100x150")
         self.target_entry.set_hexpand(True)
         form.attach(self.target_entry, 1, row, 1, 1)
         row += 1
         self.target_hint = Gtk.Label(xalign=0)
-        self.target_hint.set_markup("<small>Der Vretti nutzt meist 100x150-mm-Rollen (synonym zu 4\"x6\"). "
-                                    "Die Marke wird automatisch gedreht und exakt auf das Etikett eingepasst, "
+        self.target_hint.set_markup("<small>Vorausgewählt ist die Werks-Kalibrierung für "
+                                    "4\"x6\"-Rollen (101,6 x 152,4 mm). Die Marke wird "
+                                    "automatisch gedreht und exakt auf das Etikett eingepasst, "
                                     "damit Barcode/QR-Code unverzerrt und scannbar bleiben.</small>")
         self.target_hint.set_line_wrap(True)
         form.attach(self.target_hint, 1, row, 2, 1)
@@ -147,21 +149,21 @@ class SetupWindow(Gtk.Window):
         self.trim_left = Gtk.Entry()
         self.trim_right = Gtk.Entry()
         trim_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        for label_text, entry in (("oben:", self.trim_top),
-                                  ("unten:", self.trim_bottom),
-                                  ("links:", self.trim_left),
-                                  ("rechts:", self.trim_right)):
+        for label_text, entry, key in (("oben:", self.trim_top, "trim_top_mm"),
+                                       ("unten:", self.trim_bottom, "trim_bottom_mm"),
+                                       ("links:", self.trim_left, "trim_left_mm"),
+                                       ("rechts:", self.trim_right, "trim_right_mm")):
             entry.set_width_chars(5)
-            entry.set_text("0")
+            entry.set_text(_def.get(key) or "0")
             trim_box.pack_start(Gtk.Label(label=label_text), False, False, 2)
             trim_box.pack_start(entry, False, False, 2)
         form.attach(trim_box, 1, row, 2, 1)
         row += 1
         self.trim_hint = Gtk.Label(xalign=0)
         self.trim_hint.set_markup(
-            "<small>mm, die zusätzlich vom Rand weggeschnitten werden (Kalibrierung: "
-            "falls Teile angeschnitten werden oder Ränder ungleich sind – "
-            "meist 0 lassen).</small>")
+            "<small>Vorausgewählt: Werks-Kalibrierung für das DHL-Privatkunden-A4 "
+            "(Scheren-Linie draußen, gleichmäßige Ränder). Nur anpassen, falls "
+            "Inhalte angeschnitten werden oder Ränder ungleich sind.</small>")
         self.trim_hint.set_line_wrap(True)
         form.attach(self.trim_hint, 1, row, 2, 1)
         row += 1
@@ -259,7 +261,9 @@ class SetupWindow(Gtk.Window):
         Formular mit den aktuellen Werten vorbelegen."""
         cfg = self.installed_cfg or {}
         target = (cfg.get("target_size_mm") or "").strip()
-        self.target_entry.set_text(target if target else "100x150")
+        _def = gh.load_defaults()
+        self.target_entry.set_text(target if target else
+                                   (_def.get("target_size_mm") or "100x150"))
         if (cfg.get("watch_mode") or "downloads") == "custom":
             self.mode_custom.set_active(True)
         else:

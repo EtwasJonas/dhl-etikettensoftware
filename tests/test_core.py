@@ -263,6 +263,28 @@ def test_crop_pdf_top_half():
         assert abs(b - 841.89 / 2) < 0.5
 
 
+def test_load_defaults_shipped():
+    """Die Werks-Kalibrierung (defaults.conf) muss ausgeliefert werden und
+    die am SN 420B verifizierten Werte enthalten."""
+    defaults = gh.load_defaults()
+    assert defaults, "defaults.conf fehlt oder ist unlesbar"
+    assert defaults["side"] == "top"
+    assert defaults["target_size_mm"] == "101.6x152.4"
+    assert defaults["rotate"] == "auto"
+    assert float(defaults["trim_top_mm"]) == 16.24
+    assert float(defaults["trim_bottom_mm"]) == 16.66
+    assert float(defaults["trim_left_mm"]) == 3.08
+    assert float(defaults["trim_right_mm"]) == 4.13
+
+
+def test_defaults_file_bom_free_lf():
+    path = REPO / "defaults.conf"
+    assert path.exists(), "defaults.conf fehlt im Repo"
+    data = path.read_bytes()
+    assert not data.startswith(b"\xef\xbb\xbf"), "defaults.conf darf kein BOM haben"
+    assert b"\r" not in data, "defaults.conf muss LF-Zeilenenden haben"
+
+
 def test_crop_region_with_x_trims():
     """trim_left/right verschieben/begrenzen die Crop-Region in x-Richtung."""
     import dhl_label
@@ -460,6 +482,8 @@ TESTS = [
     test_calibration_variants_and_cmds,
     test_default_config_path_env_override,
     test_default_config_path_platform,
+    test_load_defaults_shipped,
+    test_defaults_file_bom_free_lf,
     test_write_config_file_roundtrip,
     test_config_env_override_used_by_dhl_label,
     test_matches_filter,

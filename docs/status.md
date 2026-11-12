@@ -1,7 +1,7 @@
 # Status & offene Aufgaben
 
 > Agenten: **Diese Datei zuerst lesen** und nach erledigten Aufgaben aktualisieren
-> (inkl. Datum). Letzte Aktualisierung: 2026-11-03.
+> (inkl. Datum). Letzte Aktualisierung: 2026-11-12.
 
 ## Aktueller Stand: Windows 11 am echten Drucker verifiziert + eingerichtet
 
@@ -65,21 +65,41 @@
   mit Trims), lokal grün; Smoketest Windows-GUI (Vorbefüllung + save-Pfad)
   grün. GTK-GUI nur py_compile + Lesen (unter Windows nicht lauffähig).
 
+### Werks-Kalibrierung ausgeliefert (12.11.2026)
+
+- Neue **`defaults.conf`** mit den verifizierten Werten (SN 420B, 03.11.):
+  `side = top`, `trim_top_mm = 16.24`, `trim_bottom_mm = 16.66`,
+  `trim_left_mm = 3.08`, `trim_right_mm = 4.13`,
+  `target_size_mm = 101.6x152.4`, `rotate = auto` – inkl. Herkunfts-Doku.
+- **Alle Setups lesen sie als Vorbefüllung** (`gh.load_defaults()`, nie-wirft):
+  Windows-GUI (tkinter), GTK-GUI (Etikettengröße + alle vier Trims),
+  install.sh (füllt nicht gesetzte `--trim-*`-Flags; interaktive
+  Etikettengröße schlägt den Default vor). EXE bündelt die Datei (`_MEIPASS`,
+  Spec-Datas), install.sh kopiert sie nach APP_DIR.
+- Wirkung: Neu-Nutzer wählen nur Drucker + Papierformat → **exakt das
+  verifizierte Druckergebnis** (Rand oben/unten 5 mm, seitlich 13,4 mm,
+  Schere draußen, Uniform-Scale). Bestehende config.conf bleiben unangetastet
+  (Config-Fallbacks bleiben neutral 0.0/leer).
+- tests/test_core.py: **20 Tests** (+`load_defaults`-Inhalt, +BOM/LF-Check
+  für defaults.conf), lokal grün.
+
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
 - **Release v1.1.0 ist live** (03.11.2026): `dhl-label.exe` hängt am Release
   (https://github.com/EtwasJonas/dhl-etikettensoftware/releases), gebaut von CI
   aus `b3d30f0`. Hinweis: Workflow-Berechtigung `contents: write` nachgereicht
   (`cc09cc0`) – bei zukünftigen Tags `v*` baut + hängt CI die EXE automatisch an.
-- **Offene Entscheidung (Nutzer):** Linux angleichen? → **Option A ist
-  erledigt** (siehe oben). Übrig bleibt:
-  - **Option B (mittel):** eigene Rasterung auf Linux (pypdfium2/Pillow als neue
-    Linux-Deps, gerastertes Schwarz/Weiß-PDF via lp) – erst nach dem ersten
-    echten Mint-Test entscheiden, ob CUPS nicht ohnehin gut genug druckt.
+  → **Neue Version mit defaults.conf als `v1.2.0` releasen** (siehe oben).
+- **Offene Entscheidung (Nutzer):** Linux-Qualität angleichen (**Option B**)?
+  Eigene Rasterung auf Linux (pypdfium2/Pillow als neue Linux-Deps, gerastertes
+  Schwarz/Weiß-PDF via lp) – erst nach dem ersten echten Mint-Test entscheiden,
+  ob CUPS nicht ohnehin gut genug druckt. **Option A (trims auf Linux) ist
+  erledigt** (siehe oben) und bekommt die Werks-Werte jetzt automatisch.
 - **Alltagsbetrieb Windows läuft** (Watcher auf dem Nutzer-PC aktiv,
   EXE installiert unter `%LOCALAPPDATA%\DHL-Etiketten\`).
-- **Mint-PC:** erster echter Test + Endkalibrierung vor Ort – die Windows-
-  Kalibrier-Werte gelten NICHT automatisch (CUPS-Media/Ränder können abweichen).
+- **Mint-PC:** erster echter Test + Endkalibrierung vor Ort – die Werks-Kalibrierung
+  wird dort als Vorbefüllung mitgeliefert, aber das Druckergebnis durch CUPS
+  (Media/Ränder) muss einmal geprüft/feinjustiert werden.
   Lokale Test-Artefakte für die Vermessung: `testdrucke/` (gitignored,
   Windows-lastig – Vermessungs-Skripte mit numpy/pypdfium2).
 

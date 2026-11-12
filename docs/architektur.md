@@ -15,6 +15,7 @@
 | `win_backend.py` | Windows-Backend: GDI-Druckpfad (pypdfium2 + Pillow + win32print/win32ui), Drucker-/Papierformate, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Stdlib (auch unter Linux importierbar). |
 | `setup_gui_win.py` | Windows-Setup-Assistent (tkinter): Formular → config.conf direkt schreiben → Autostart-Verknüpfung → GUI-Kalibrierung (Variante 4 nur Linux). |
 | `dhl-label-win.spec` | PyInstaller-Spec → `dist/dhl-label.exe` (onefile, windowed, icon.ico). |
+| `defaults.conf` | Werks-Kalibrierung (verifiziert am SN 420B): side/trims/target_size_mm/rotate. Werden von allen Setups als Vorbefüllung gelesen (Windows-GUI, GTK-GUI, install.sh); EXE bündelt die Datei. Bestehende config.conf bleiben unangetastet. |
 | `.github/workflows/windows-build.yml` | CI: Tests (Linux+Windows), EXE-Build, Release-Anhang bei Tag `v*`. |
 | `tests/test_core.py` | Minimale Test-Suite (`python tests/test_core.py`), plattformunabhängig. |
 | `README.md` | Nutzer-Doku (Download-Link der ZIP, 3-Schritte-Installation, Befehle, Kalibrierung, Fehlersuche). |
