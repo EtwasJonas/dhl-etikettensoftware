@@ -46,8 +46,15 @@ systemd-User-Service = „PDF herunterladen → druckt automatisch“.
   4 der Kalibrierung gibt es nur unter Linux (in GUI + Fehlermeldungen beachten).
 - **Uniform-Scale gilt auch im Windows-Druckpfad** (`fit_rect` in
   win_backend.py) – Barcode-Scannbarkeit!
-- Test-venv: `$env:TEMP\opencode\wenv` (pypdf, pywin32, pypdfium2, Pillow,
-  pyinstaller). EXE-Build: `python -m PyInstaller dhl-label-win.spec --noconfirm`.
+- Test-venv: `$env:LOCALAPPDATA\opencode\wenv` (Python 3.13; pypdf, pywin32,
+  pypdfium2, Pillow, pyinstaller). **Nicht mehr `$env:TEMP\opencode\wenv`
+  nutzen** – das alte venv im %TEMP% wurde im Lauf des 12.11. aushollowt
+  (pip/PyInstaller/win32print-Dateien verschwanden, Ursache ungeklärt –
+  vermutlich Temp-Cleaner/AV) und ist unbrauchbar; `$env:TEMP\opencode\pylibs`
+  (pypdf) ist ebenfalls defekt. Tests/Bau nur noch mit dem venv-Python:
+  `& "$env:LOCALAPPDATA\opencode\wenv\Scripts\python.exe" …` (enthält pypdf,
+  daher kein PYTHONPATH-Gefummel mehr). EXE-Build:
+  `& "$env:LOCALAPPDATA\opencode\wenv\Scripts\python.exe" -m PyInstaller dhl-label-win.spec --noconfirm`.
 - windowed-EXE: PowerShell wartet nicht → `Start-Process -Wait -PassThru`;
   Prozesse nur mit `Stop-Process -Name dhl-label` beenden (onefile Parent/Child).
 - "Microsoft Print to PDF" hängt bei StartDoc (modaler Dialog) → GDI-Tests

@@ -114,6 +114,31 @@
   (Status-Knopf-Text, `manual_print`/kein `calibrate`, `_move_processed`,
   Log-Zeitstempel) – grün. Lokale EXE-Build-Verifikation siehe Commit.
 
+### Warnung „Failed to remove temporary directory“ – Diagnose + Fix (12.11.2026)
+
+- **Ursache:** Der Watcher wurde von der GUI (onefile-EXE) detached gespawnt
+  und **erbte die PyInstaller-Env-Variablen (`_PYI_*`/`_MEI_*`)** – der neue
+  Bootloader hielt sich dann für „schon entpackt“ und **teilte sich den
+  _MEI-Tempordner der GUI** (nachgewiesen: Watcher-Prozess 15612 hatte
+  python312.dll aus dem GUI-Ordner gemappt, kein eigener _MEI-Ordner
+  vorhanden). Beim GUI-Schließen konnte der Bootloader den Ordner nicht
+  löschen, solange der Watcher lief → Warn-Popup + Restordner in %TEMP%
+  (10 Dateien: python312.dll, VCRUNTIME, pywin32-DLLs). **Harmlos**, aber
+  nervig + Müll (~9–49 MB pro Vorkommen; 10 Alt-Ordner ≈ 360 MB auf dem
+  Dev-PC aufgeräumt).
+- **Fix:** `spawn_watch_detached()` startet den Watcher mit **bereinigter
+  Env** (alle `_MEI*`/`_PYI*`-Variablen entfernt) → eigener Temp-Ordner,
+  den der Watcher beim eigenen Ende selbst aufräumt. Verifiziert: Clean-Env-
+  Start der EXE (`watch`, Lock belegt) erzeugt **keinen** Restordner.
+- **Dev-Env:** altes Test-venv `$env:TEMP\opencode\wenv` wurde aushollowt
+  (pip/PyInstaller/win32print-Dateien verschwanden; `pylibs`-pypdf defekt)
+  → neues venv **`$env:LOCALAPPDATA\opencode\wenv`** (Python 3.13), AGENTS.md
+  aktualisiert. Neue lokale EXE geprüft: win32com/pywin32/tkinter/pdfium/
+  defaults.conf gebündelt, `--help`/`crop`/Lock-Watch alle rc=0.
+  **Der Watcher lief beim Testen von einem zweiten Download „dhl-label
+  (1).exe“** – Prozessname ändert sich durch das „ (1)“, `Get-Process
+  dhl-label` findet ihn nicht (immer `dhl-label*` suchen).
+
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
 - **Release v1.2.0 ist live** (12.11.2026, defaults.conf/Werks-Kalibrierung).

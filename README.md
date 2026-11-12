@@ -325,6 +325,14 @@ dhl-label.exe printers                   # Druckerliste + Papierformate
     zwischen den Versuchen**; danach liegt die PDF in
     `fehlgeschlagen/` und lässt sich mit dem Knopf **„Manuell
     drucken…“** (oder `dhl-label print DATEI.pdf`) nachdrucken.
+- Warning „Failed to remove temporary directory … _MEI…“ kurz nach dem
+  Schließen: **harmlos** – der Watcher lief zum Zeitpunkt des Schließens
+  noch und die GUI konnte ihr temporäres Entpack-Verzeichnis nicht
+  vollständig löschen. Seit der Watcher mit bereinigter Umgebung gestartet
+  wird (eigener Temp-Ordner, den er beim eigenen Ende selbst aufräumt),
+  tritt die Meldung nicht mehr auf; übrig gebliebene `_MEI…`-Ordner in
+  `%TEMP%` kann man bedenkenlos löschen (solange das Programm nicht
+  gerade läuft).
 - Watcher läuft doppelt? Der Watcher schützt sich selbst (zweiter Start
   beendet sich, Lock: `%LOCALAPPDATA%\dhl-label\watcher.lock`).
 - Drucker fehlt in der Liste: USB-Kabel anstecken/Drucker einschalten,

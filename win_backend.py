@@ -681,4 +681,14 @@ def spawn_watch_detached():
         interpreter = pythonw if pythonw.exists() else sys.executable
         cmd = [str(interpreter), str(base / "dhl_label.py"), "watch"]
         cwd = str(base)
-    subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=cwd)
+    # WICHTIG: PyInstaller-Env-Variablen (_PYI_* / _MEI*) NICHT vererben!
+    # Der GUI-Prozess (onefile) führt sie im Environment; erbt der neue
+    # Bootloader sie, glaubt er, schon entpackt zu haben, und teilt sich den
+    # _MEI-Tempordner der GUI. Folge: Beim GUI-Schließen kann der Ordner
+    # nicht gelöscht werden, solange der Watcher läuft → Warnung
+    # „Failed to remove temporary directory … _MEI…“ und Restordner in %TEMP%.
+    # Mit bereinigter Env entpackt sich der Watcher in seinen EIGENEN Ordner
+    # und räumt ihn beim eigenen Ende selbst auf.
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(("_MEI", "_PYI"))}
+    subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=cwd, env=env)
