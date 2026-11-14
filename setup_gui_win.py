@@ -7,9 +7,11 @@ GTK3/PyGObject ist unter Windows nicht praktikabel; tkinter ist in der
 Windows-Python-Installation enthalten und wird von PyInstaller gebündelt.
 
 Ablauf:
-  1) Formular: Drucker, Papierformat (Windows-Treiber), Etikettengröße,
-     Zuschnitt, Watch-Modus (Downloads mit Namensfilter oder eigener Ordner),
-     Position der Marke im A4-PDF, Autostart
+  1) Formular: Profil („Standard“ = Werks-Kalibrierung; eigene Profile
+     speicherbar/wechselbar/löschbar), Drucker, Papierformat
+     (Windows-Treiber), Etikettengröße, Zuschnitt, Watch-Modus (Downloads
+     mit Namensfilter oder eigener Ordner), Position der Marke im A4-PDF,
+     Autostart
   2) „Einrichten“ → schreibt %APPDATA%/dhl-label/config.conf, richtet die
      Autostart-Verknüpfung im Startmenü-Autostart-Ordner ein (kein Admin
      nötig) und startet einen laufenden Watcher mit den neuen Werten neu
@@ -60,6 +62,8 @@ class SetupWindow:
         self.installed_cfg = None
         self._action_buttons = []
         self._watcher_state = None
+        self._profiles = {}        # {name: werte} aus der config.conf
+        self._active_profile = ""  # aktuell gewähltes Profil
 
         self._build_ui()
         ok, problems = gh.check_environment()
@@ -89,6 +93,7 @@ class SetupWindow:
         self.pattern_var = tk.StringVar(value=DEFAULT_PATTERN)
         self.side_var = tk.StringVar(value="top")
         self.autostart_var = tk.BooleanVar(value=True)
+        self.profile_var = tk.StringVar()
 
         main = ttk.Frame(self.root, padding=12)
         main.pack(fill="both", expand=True)
@@ -145,6 +150,33 @@ class SetupWindow:
                              "übernehmen.", wraplength=560,
                   foreground="#555").grid(row=row, column=1, columnspan=2,
                                           sticky="w", pady=(0, 4))
+        row += 1
+
+        # Profil
+        add_label("Profil:", row, bold=True)
+        prof_frame = ttk.Frame(form)
+        prof_frame.grid(row=row, column=1, columnspan=2, sticky="ew", pady=3)
+        self.profile_combo = ttk.Combobox(prof_frame, state="readonly",
+                                          textvariable=self.profile_var, width=26)
+        self.profile_combo.pack(side="left")
+        self.profile_combo.bind("<<ComboboxSelected>>", self.on_profile_selected)
+        self.profile_new_btn = ttk.Button(prof_frame, text="Als neues Profil…",
+                                          command=self.new_profile, width=16)
+        self.profile_new_btn.pack(side="left", padx=(8, 0))
+        self.profile_del_btn = ttk.Button(prof_frame, text="Löschen",
+                                          command=self.delete_profile_clicked,
+                                          width=10)
+        self.profile_del_btn.pack(side="left", padx=(8, 0))
+        self._action_buttons.append(self.profile_new_btn)
+        self._action_buttons.append(self.profile_del_btn)
+        row += 1
+        ttk.Label(form, text="„Standard“ = Werks-Kalibrierung (verifizierte Werte). "
+                             "Profil wechseln lädt dessen Werte (Etikettengröße, "
+                             "Zuschnitt, Position der Marke) – übernehmen mit "
+                             "„Einrichten“ / „Einstellungen aktualisieren“.",
+                  wraplength=560, foreground="#555").grid(row=row, column=1,
+                                                          columnspan=2,
+                                                          sticky="w", pady=(0, 4))
         row += 1
 
         # Etikettengröße
@@ -293,38 +325,165 @@ class SetupWindow:
         state = "normal" if self.watch_mode_var.get() == "downloads" else "disabled"
         self.pattern_entry.configure(state=state)
 
+    # ------------------------------------------------------------ Profile
+
+    def _set_form_values(self, values):
+        """Etikettengröße + Zuschnitt + Position aus Profil-Werten ins Formular."""
+        self.target_var.set((values.get("target_size_mm") or "").strip())
+        for var, key in ((self.trim_top_var, "trim_top_mm"),
+                         (self.trim_bottom_var, "trim_bottom_mm"),
+                         (self.trim_left_var, "trim_left_mm"),
+                         (self.trim_right_var, "trim_right_mm")):
+            raw = (values.get(key) or "0").replace(",", ".")
+            try:
+                value = float(raw)
+            except ValueError:
+                value = 0.0
+            var.set(f"{value:g}")
+        self.side_var.set("bottom" if (values.get("side") or "").lower() == "bottom"
+                          else "top")
+
+    def _set_profile_choices(self, selected):
+        """Profil-Dropdown füllen; Auswahl = selected (oder leer = kein Profil)."""
+        names = list(self._profiles.keys())
+        self.profile_combo.configure(values=names)
+        self.profile_var.set(selected if selected in self._profiles else "")
+
+    def on_profile_selected(self, _event=None):
+        """Anderes Profil gewählt: dessen Werte ins Formular laden (nicht
+        speichern – das passiert über „Einrichten“/„Einstellungen aktualisieren“)."""
+        if self.busy:
+            return
+        name = self.profile_var.get().strip()
+        if name and name in self._profiles:
+            self._active_profile = name
+            self._set_form_values(self._profiles[name])
+            self._log(f"Profil „{name}“ geladen – übernehmen mit "
+                      "„Einrichten“ bzw. „Einstellungen aktualisieren“.")
+
+    def _current_profile_values(self, trim_top, trim_bottom, trim_left, trim_right,
+                                target_text):
+        """Profil-Werte aus dem Formular (fürs Speichern/Aktualisieren)."""
+        return {
+            "side": self.side_var.get(),
+            "trim_top_mm": f"{trim_top:g}",
+            "trim_bottom_mm": f"{trim_bottom:g}",
+            "trim_left_mm": f"{trim_left:g}",
+            "trim_right_mm": f"{trim_right:g}",
+            "target_size_mm": target_text,
+            "rotate": "auto",  # Rotation wird in der GUI immer auf auto gesetzt
+        }
+
+    def new_profile(self):
+        """Aktuelle Formular-Werte als neues Profil speichern und aktiv setzen
+        (läuft über „Einrichten“ → Config + Watcher-Neustart)."""
+        if self.busy:
+            return
+        from tkinter import simpledialog
+
+        name = simpledialog.askstring(
+            "Neues Profil",
+            "Name des neuen Profils\n(z.B. „Zweit-PC“ oder „Testwerte“):",
+            parent=self.root)
+        if not name:
+            return
+        name = name.strip()
+        if name.lower() == gh.FACTORY_PROFILE.lower():
+            messagebox.showerror(
+                "Neues Profil",
+                "„Standard“ ist das Werks-Profil – es ist immer vorhanden und "
+                "kann nicht neu angelegt werden. Um die Werks-Werte zu ändern: "
+                "Profil „Standard“ auswählen, Werte anpassen und "
+                "„Einstellungen aktualisieren“ klicken.")
+            return
+        if not gh.valid_profile_name(name):
+            messagebox.showerror(
+                "Neues Profil",
+                "Bitte einen Namen mit höchstens 40 Zeichen ohne [ ] : = verwenden.")
+            return
+        if any(name.lower() == existing.lower() for existing in self._profiles):
+            messagebox.showerror(
+                "Neues Profil",
+                f"Profil „{name}“ gibt es schon.\n\nProfil oben auswählen und "
+                "„Einstellungen aktualisieren“ klicken, um es mit den "
+                "angezeigten Werten zu überschreiben.")
+            return
+        self.profile_var.set(name)
+        self.save()
+
+    def delete_profile_clicked(self):
+        """Gewähltes (nicht-Werks-)Profil aus der config.conf entfernen."""
+        if self.busy:
+            return
+        name = self.profile_var.get().strip()
+        if not name:
+            messagebox.showerror("Profil löschen",
+                                 "Bitte zuerst ein Profil auswählen.")
+            return
+        if name == gh.FACTORY_PROFILE:
+            messagebox.showerror(
+                "Profil löschen",
+                "Das Werks-Profil „Standard“ kann nicht gelöscht werden.\n\n"
+                "Seine Werte kannst du ändern: Profil „Standard“ auswählen, "
+                "Werte anpassen, „Einstellungen aktualisieren“ klicken.")
+            return
+        config_path = gh.default_config_path()
+        if not config_path.exists():
+            messagebox.showerror("Profil löschen",
+                                 "Es gibt noch keine gespeicherten Einstellungen.")
+            return
+        if not messagebox.askyesno(
+                "Profil löschen",
+                f"Profil „{name}“ wirklich löschen?\n\nDie Werte im Formular "
+                "bleiben unverändert."):
+            return
+        try:
+            removed = gh.delete_profile(config_path, name)
+        except Exception as exc:
+            messagebox.showerror("Profil löschen", str(exc))
+            return
+        if not removed:
+            messagebox.showerror(
+                "Profil löschen",
+                f"Profil „{name}“ war nicht in den Einstellungen gespeichert.")
+            return
+        self._profiles.pop(name, None)
+        if self._active_profile == name:
+            self._active_profile = ""
+        self._set_profile_choices("")
+        self._log(f"Profil „{name}“ gelöscht – Formular unverändert.")
+
     # ------------------------------------------------------------ Zustand
 
     def refresh_state(self):
         installed, cfg = gh.installed_state()
         self.installed_cfg = cfg if installed else None
         if installed:
+            self._profiles, active = gh.read_profiles()
+            values, selected, hinweis = gh.resolve_startup_values(
+                cfg, self._profiles, active)
+            self._active_profile = selected
             self.banner.configure(
-                text="✓ Bereits installiert – unten sind die aktuellen Werte eingestellt.",
+                text=f"✓ Bereits installiert – Profil: {selected or '(keins)'}",
                 foreground="#1a7f37")
             self.save_btn.configure(text="Einstellungen aktualisieren")
             self.uninstall_btn.pack(side="right")
             self.printer_var.set(cfg.get("printer", ""))
             self.paper_var.set(cfg.get("media", ""))
-            self.target_var.set(cfg.get("target_size_mm") or "100x150")
             self.watch_mode_var.set(
                 "downloads" if cfg.get("watch_mode", "downloads") == "downloads"
                 else "custom")
             self.watch_dir_var.set(cfg.get("watch_dir")
                                    or str(Path.home() / "Downloads"))
             self.pattern_var.set(cfg.get("filename_pattern") or DEFAULT_PATTERN)
-            self.side_var.set(cfg.get("side", "top"))
-            for var, key in ((self.trim_top_var, "trim_top_mm"),
-                             (self.trim_bottom_var, "trim_bottom_mm"),
-                             (self.trim_left_var, "trim_left_mm"),
-                             (self.trim_right_var, "trim_right_mm")):
-                raw = (cfg.get(key) or "0").replace(",", ".")
-                try:
-                    value = float(raw)
-                except ValueError:
-                    value = 0.0
-                var.set(f"{value:g}")
+            self._set_profile_choices(selected)
+            self._set_form_values(values)
+            if hinweis:
+                self._log("Hinweis: " + hinweis)
         else:
+            self._profiles, _active = gh.read_profiles()  # → nur „Standard“
+            self._active_profile = gh.FACTORY_PROFILE
+            self._set_profile_choices(gh.FACTORY_PROFILE)
             self.banner.configure(text="Noch nicht eingerichtet.",
                                   foreground="#555")
             self.save_btn.configure(text="Einrichten")
@@ -423,6 +582,15 @@ class SetupWindow:
                                  "Namensfilter darf im Downloads-Modus nicht leer sein.")
             return
 
+        profile_name = self.profile_var.get().strip()
+        profiles = dict(self._profiles)
+        if profile_name:
+            # Gewähltes Profil mit den Formular-Werten synchronisieren
+            profiles[profile_name] = self._current_profile_values(
+                trim_top, trim_bottom, trim_left, trim_right, target_text)
+        # Manuell gepflegte lp-Extra-Optionen nicht verschlucken
+        extra_options = (self.installed_cfg or {}).get("extra_options") or ""
+
         self._set_busy(True)
         self._log("Speichere Einstellungen ...")
 
@@ -440,7 +608,11 @@ class SetupWindow:
                     trim_top_mm=trim_top,
                     trim_bottom_mm=trim_bottom,
                     trim_left_mm=trim_left,
-                    trim_right_mm=trim_right)
+                    trim_right_mm=trim_right,
+                    extra_options=extra_options,
+                    profile=profile_name,
+                    profiles=profiles)
+                self._profiles = profiles
                 self._ui(self._log, f"Konfiguration geschrieben: {path}")
                 if getattr(sys, "frozen", False):
                     installed_exe = win_backend.install_exe_copy()

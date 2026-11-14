@@ -1,7 +1,7 @@
 # Status & offene Aufgaben
 
 > Agenten: **Diese Datei zuerst lesen** und nach erledigten Aufgaben aktualisieren
-> (inkl. Datum). Letzte Aktualisierung: 2026-11-12.
+> (inkl. Datum). Letzte Aktualisierung: 2026-11-14.
 
 ## Aktueller Stand: Windows 11 am echten Drucker verifiziert + eingerichtet
 
@@ -139,17 +139,77 @@
   (1).exe“** – Prozessname ändert sich durch das „ (1)“, `Get-Process
   dhl-label` findet ihn nicht (immer `dhl-label*` suchen).
 
+### Profile + Werks-Werte-Migration (14.11.2026)
+
+**Problem (Nutzer-Feedback zu v1.2.0):** Auf dem Zweit-PC standen überall
+0-Werte, obwohl das Release „Werkseinstellungen direkt drin“ versprach.
+Ursache: `defaults.conf` war nur **Vorbefüllung für neue Installationen** –
+die auf dem Zweit-PC bereits vorhandene config.conf (vom v1.1.0-Setup, alle
+Zuschnitte 0) bleibt laut Design unangetastet und die GUI zeigte deren Werte.
+
+**Lösung: Profile + Legacy-Migration**
+
+- **Profil-Modell** (gui_helpers, config.conf):
+  - Profile = gespeicherte Kalibrier-Sätze (side, trims, target_size_mm,
+    rotate) als `[profile:NAME]`-Sektionen; `[crop] profile = NAME` markiert
+    das aktive. Die **wirksamen** Werte bleiben `[crop]` (kein Verhaltensturm,
+    calibrate/crop-CLI unverändert).
+  - **„Standard“ = Werks-Kalibrierung** (defaults.conf), immer vorhanden,
+    nicht löschbar; Wechsel kopiert Werte nach `[crop]` (Dienst-Neustart nötig).
+  - Neue gui_helpers-Funktionen: `read_profiles`, `resolve_startup_values`,
+    `normalize_profile_values`, `profile_values_equal`, `factory_profile_values`,
+    `trims_are_zero`, `valid_profile_name`, `set_active_profile`,
+    `upsert_profile`, `delete_profile`; `write_config_file(profile=,
+    profiles=)` schreibt `[crop] profile` + Profil-Sektionen;
+    `read_installed_config` liefert `profile`; `build_install_cmd(profile=)`.
+- **Zweit-PC-Fix (`resolve_startup_values`):** Kein Profil-Schlüssel +
+  alle Zuschnitte 0 → GUI füllt die **Werks-Werte** voraus und zeigt einen
+  Migrations-Hinweis; ein Klick auf „Einstellungen aktualisieren“ übernimmt
+  sie (und setzt den Profil-Marker). Werte == Werks-Standard → direkt als
+  „Standard“ gewählt; eigene Werte → Auswahl leer + Hinweis „noch kein Profil“.
+- **Windows-GUI (tkinter):** Profil-Zeile über der Etikettengröße – Dropdown
+  (Standard zuerst), „Als neues Profil…“ (simpledialog, Validierung, Standard
+  geschützt), „Löschen“ (Bestätigung; aktives Profil → Marker geleert).
+  Profilwechsel lädt Werte ins Formular (Übernehmen bewusst über
+  „Einstellungen aktualisieren“, das startet den Watcher neu). Speichern
+  synchronisiert das gewählte Profil; `extra_options` bleibt erhalten (Bugfix).
+- **GTK-GUI:** gleiche Konzepte (ComboBoxText + Eingabe-Dialog für Profilnamen;
+  „Als neues Profil…“ → upsert + aktiv + `systemctl --user restart`); 
+  Kalibrier-Dialog „Werte speichern“ erhält jetzt den Profil-Bestand und
+  synchronisiert das aktive Profil (vorher wären Profile verloren gegangen).
+- **install.sh:** neues Flag `--profile` (Default: aktives Profil der alten
+  Config, sonst „Standard“), `[crop] profile = …` + frische
+  `[profile:NAME]`-Sektion; **bewahrt alle anderen `[profile:*]`-Sektionen**
+  (Erneut-Installieren verliert keine Profile; awk-Extraktion vor dem
+  Überschreiben). Name-Validierung (max. 40 Zeichen, ohne `[ ] : =`).
+- **CLI:** `dhl-label profiles` (Liste, „*“ = aktiv; EXE zeigt Dialogfenster)
+  und `dhl-label profiles NAME` (wechseln → Werte nach `[crop]`, Hinweis auf
+  Dienst-Neustart). Config repr/show-config zeigt `profil=…`; Watcher-Start-Log
+  nennt das aktive Profil; calibrate-Hinweis erwähnt Profile.
+- **Tests:** 28 (+8 Profil-Tests: Namen, Normalisierung, Vergleich,
+  write_config_file-Roundtrip mit Sektionen, Legacy-Migration,
+  resolve-Regeln 1–3, upsert/set_active/delete inkl. „Standard geschützt“,
+  build_install_cmd mit --profile) – **lokal grün**.
+- **GUI-Smoketest (Windows, mainloop-Pumps, Watcher-Stubs):** Legacy-0er-Config
+  → Werks-Vorbefüllung → Speichern (profile=Standard + Sektion) → neues Profil
+  „Test2“ → Löschen – grün. install.sh-Profil-Flow (awk-Erhalt + Neuschreiben)
+  per Sandbox-Test verifiziert.
+
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
-- **Release v1.2.0 ist live** (12.11.2026, defaults.conf/Werks-Kalibrierung).
-  Für die GUI/Watcher-Änderungen von heute ggf. **v1.2.1 taggen** (CI baut +
-  hängt die EXE automatisch an; Nutzer installiert vom Release).
+- **Release v1.3.0 taggen** (Profil-Feature + Zweit-PC-Migration): `git tag
+  v1.3.0 && git push origin v1.3.0` – CI baut + hängt die EXE automatisch an
+  (contents:write). Nutzer installiert die EXE vom Release → GUI zeigt auf
+  dem Zweit-PC die Werks-Werte vorausgefüllt; einmal „Einstellungen
+  aktualisieren“ klicken (oder Profil „Standard“ wählen), danach Watcher-Neustart.
+- **Release v1.2.0 ist live** (12.11.2026, defaults.conf/Werks-Kalibrierung)
+  – wird durch v1.3.0 oben abgelöst.
 - **Watcher-Fehler am Zweit-PC ungeklärt**: Nutzer-Test dort – GUI-Testdruck
   ok, aber PDFs landeten direkt in `fehlgeschlagen/`. Auf dem Dev-PC keine
   Spur (keine DHL-PDFs/Ordner heute). Mit dem neuen Build ist die Ursache
   im Log sichtbar (Zeitstempel + effektive Config + Drucker-Warnung).
   → Log des Zweit-PCs ansehen (`%LOCALAPPDATA%\dhl-label\dhl-label.log`),
-  dann neuen Test mit v1.2.1-EXE fahren.
+  dann neuen Test mit v1.3.0-EXE fahren.
 - **Offene Entscheidung (Nutzer):** Linux-Qualität angleichen (**Option B**)?
   Eigene Rasterung auf Linux (pypdfium2/Pillow als neue Linux-Deps, gerastertes
   Schwarz/Weiß-PDF via lp) – erst nach dem ersten echten Mint-Test entscheiden,

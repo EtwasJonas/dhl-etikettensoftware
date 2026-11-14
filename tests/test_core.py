@@ -415,6 +415,175 @@ def test_compose_target_rot270_still_uniform():
         _assert_uniform(ctm, "rotate=270")
 
 
+# ------------------------------------------------------------------ Profile
+
+def test_valid_profile_name():
+    assert gh.valid_profile_name("Standard")
+    assert gh.valid_profile_name("Mein Drucker")
+    assert gh.valid_profile_name("Test 2")
+    for bad in ("", "   ", "x" * 41, "a:b", "a[b]", "a=b", "a\tb"):
+        assert not gh.valid_profile_name(bad), bad
+
+
+def test_normalize_profile_values():
+    values = gh.normalize_profile_values({
+        "trim_top_mm": "16,24", "trim_bottom_mm": "16.66",
+    })
+    assert values["trim_top_mm"] == "16.24"
+    assert values["trim_bottom_mm"] == "16.66"
+    assert values["trim_left_mm"] == "0"
+    assert values["side"] == "top"        # fehlend → Default
+    assert values["rotate"] == "auto"     # fehlend → Default
+    assert values["target_size_mm"] == ""  # fehlend → leer (= nur croppen)
+
+
+def test_profile_values_equal():
+    factory = gh.factory_profile_values()
+    assert factory, "defaults.conf muss lesbar sein"
+    assert gh.profile_values_equal(factory, dict(factory))
+    assert gh.profile_values_equal(factory, {**factory, "trim_top_mm": "16,24"})
+    assert not gh.profile_values_equal(factory, {**factory, "trim_top_mm": "17"})
+    assert not gh.profile_values_equal(factory, {**factory, "side": "bottom"})
+    assert gh.profile_values_equal({"target_size_mm": ""},
+                                   {"target_size_mm": "0"})
+
+
+def test_write_config_file_with_profiles_roundtrip():
+    import configparser
+    import dhl_label
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "config.conf"
+        profiles = {
+            "Standard": gh.normalize_profile_values(gh.load_defaults()),
+            "Test": {"side": "top", "trim_top_mm": "5", "trim_bottom_mm": "5",
+                     "trim_left_mm": "0", "trim_right_mm": "0",
+                     "target_size_mm": "100x150", "rotate": "auto"},
+        }
+        gh.write_config_file(
+            path, printer="Vretti", media="4x6", target_size_mm="101.6x152.4",
+            watch_mode="downloads", watch_dir=str(tmp),
+            filename_pattern="versand|dhl|paket", side="top",
+            trim_top_mm=16.24, trim_bottom_mm=16.66, trim_left_mm=3.08,
+            trim_right_mm=4.13, profile="Test", profiles=profiles)
+        data = path.read_bytes()
+        assert not data.startswith(b"\xef\xbb\xbf"), "kein BOM erlaubt"
+        assert b"\r" not in data, "LF-Zeilenenden"
+        cp = configparser.ConfigParser()
+        cp.read(str(path), encoding="utf-8")
+        assert cp["crop"]["profile"] == "Test"
+        assert cp["profile:Test"]["trim_top_mm"] == "5"
+        assert cp["profile:Standard"]["trim_top_mm"] == "16.24"
+        cfg = dhl_label.Config(path)
+        assert cfg.profile == "Test"
+        assert cfg.trim_top_mm == 16.24
+        assert cfg.target_mm == (101.6, 152.4)
+
+
+def test_read_profiles_legacy_config_gets_factory_standard():
+    """Alte config.conf (vor v1.2.0, Zuschnitt überall 0, kein Profil):
+    GUI-Vorbefüllung muss die Werks-Kalibrierung zeigen (Zweit-PC-Fix)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "config.conf"
+        gh.write_config_file(path, printer="Vretti", media="4x6",
+                             target_size_mm="100x150", watch_dir=str(tmp))
+        profiles, active = gh.read_profiles(path)
+        assert "Standard" in profiles
+        assert active == ""
+        factory = gh.factory_profile_values()
+        assert float(profiles["Standard"]["trim_top_mm"]) == \
+            float(factory["trim_top_mm"])
+        cfg = gh.read_installed_config(path)
+        values, selected, hinweis = gh.resolve_startup_values(cfg, profiles, active)
+        assert selected == "Standard"
+        assert float(values["trim_top_mm"]) == float(factory["trim_top_mm"])
+        assert hinweis, "Migration muss als Hinweis sichtbar sein"
+
+
+def test_resolve_startup_values():
+    profiles = {
+        "Standard": gh.normalize_profile_values(gh.load_defaults()),
+        "Test": gh.normalize_profile_values({
+            "side": "top", "trim_top_mm": "5", "trim_bottom_mm": "5",
+            "trim_left_mm": "0", "trim_right_mm": "0",
+            "target_size_mm": "100x150", "rotate": "auto"}),
+    }
+    # 1) Aktives Profil gewinnt
+    test_values = profiles["Test"]
+    values, selected, hinweis = gh.resolve_startup_values(
+        test_values, profiles, "Test")
+    assert selected == "Test" and hinweis is None
+    assert values["trim_top_mm"] == "5"
+    # 2) Kein Profil, aber Werte == Werks-Standard → Standard gewählt
+    values, selected, hinweis = gh.resolve_startup_values(
+        gh.normalize_profile_values(gh.load_defaults()), profiles, "")
+    assert selected == "Standard" and hinweis is None
+    # 3) Eigene Werte, kein Profil → leere Auswahl + Hinweis
+    custom = dict(test_values, trim_top_mm="7")
+    values, selected, hinweis = gh.resolve_startup_values(custom, profiles, "")
+    assert selected == "" and hinweis
+    assert values["trim_top_mm"] == "7"
+
+
+def test_upsert_set_active_delete_profile():
+    import configparser
+    import dhl_label
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "config.conf"
+        gh.write_config_file(path, printer="Vretti", media="4x6",
+                             target_size_mm="101.6x152.4", watch_dir=str(tmp))
+        values = {"side": "top", "trim_top_mm": 5, "trim_bottom_mm": 5,
+                  "trim_left_mm": 0, "trim_right_mm": 0,
+                  "target_size_mm": "100x150", "rotate": "auto"}
+        gh.upsert_profile(path, "Test", values, activate=True)
+        cp = configparser.ConfigParser()
+        cp.read(str(path), encoding="utf-8")
+        assert cp["profile:Test"]["trim_top_mm"] == "5"
+        assert cp["crop"]["profile"] == "Test"
+        assert float(cp["crop"]["trim_top_mm"]) == 5.0
+        cfg = dhl_label.Config(path)
+        assert cfg.profile == "Test" and cfg.trim_top_mm == 5.0
+        # Wechsel: Werks-Profil → Werte wandern nach [crop]
+        factory = gh.factory_profile_values()
+        gh.set_active_profile(path, "Standard")
+        cfg = dhl_label.Config(path)
+        assert cfg.profile == "Standard"
+        assert cfg.trim_top_mm == float(factory["trim_top_mm"])
+        # Löschen: Standard geschützt; Test (nicht mehr aktiv) verschwindet,
+        # der Profil-Marker bleibt auf dem aktiven Profil
+        assert not gh.delete_profile(path, "Standard")
+        assert gh.delete_profile(path, "Test")
+        cp = configparser.ConfigParser()
+        cp.read(str(path), encoding="utf-8")
+        assert not cp.has_section("profile:Test")
+        assert cp["crop"]["profile"] == "Standard"
+        assert cp["printer"]["name"] == "Vretti"
+        assert float(cp["crop"]["trim_top_mm"]) == float(factory["trim_top_mm"])
+        # Löschen des AKTIVEN Profils leert den Marker ([crop]-Werte bleiben)
+        gh.upsert_profile(path, "Aktiv", values, activate=True)
+        assert gh.delete_profile(path, "Aktiv")
+        cp = configparser.ConfigParser()
+        cp.read(str(path), encoding="utf-8")
+        assert not cp.has_section("profile:Aktiv")
+        assert cp["crop"]["profile"] == ""
+        assert cp["printer"]["name"] == "Vretti"
+        assert float(cp["crop"]["trim_top_mm"]) == 5.0
+
+
+def test_build_install_cmd_with_profile():
+    cmd = gh.build_install_cmd(
+        "install.sh", printer="V", media="M", target="100x150",
+        watch_mode="downloads", watch_dir="/d", pattern="p", side="top",
+        profile="Zweit-PC")
+    start = cmd.index("--profile")
+    assert cmd[start:start + 2] == ["--profile", "Zweit-PC"]
+    no_profile = gh.build_install_cmd(
+        "install.sh", printer="V", media="M", target="100x150",
+        watch_mode="downloads", watch_dir="/d", pattern="p", side="top")
+    assert "--profile" not in no_profile
+
+
 # ------------------------------------------------------------------ Windows
 
 def test_fit_rect_uniform():
@@ -486,6 +655,14 @@ TESTS = [
     test_defaults_file_bom_free_lf,
     test_write_config_file_roundtrip,
     test_config_env_override_used_by_dhl_label,
+    test_valid_profile_name,
+    test_normalize_profile_values,
+    test_profile_values_equal,
+    test_write_config_file_with_profiles_roundtrip,
+    test_read_profiles_legacy_config_gets_factory_standard,
+    test_resolve_startup_values,
+    test_upsert_set_active_delete_profile,
+    test_build_install_cmd_with_profile,
     test_matches_filter,
     test_crop_pdf_top_half,
     test_crop_region_with_x_trims,

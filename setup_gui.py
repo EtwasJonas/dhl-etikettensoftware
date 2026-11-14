@@ -5,7 +5,9 @@ setup_gui.py – GUI-Setup-Assistent für die DHL-Etikettensoftware (GTK3).
 
 Läuft auf Linux Mint/Ubuntu sofort (PyGObject/GTK3 ist dort vorinstalliert).
 Ablauf:
-  1) Formular: Drucker, Mediengröße, Etikettengröße, Watch-Modus, Marke-Position
+  1) Formular: Profil („Standard“ = Werks-Kalibrierung; eigene Profile
+      speicherbar/wechselbar/löschbar), Drucker, Mediengröße, Etikettengröße,
+      Zuschnitt, Watch-Modus, Marke-Position
   2) "Installation starten" → install.sh (nicht-interaktiv) läuft im Hintergrund,
      Ausgabe wird live ins Fenster gestreamt
   3) Erfolgsmeldung + optionaler GUI-Kalibrierdialog (jeder Testdruck nur nach
@@ -74,6 +76,9 @@ class SetupWindow(Gtk.Window):
         self.uninstalling = False
         self.installed_cfg = None
         self._printer_names = []
+        self._building = False      # Unterdrückt Callbacks beim Formular-Füllen
+        self._profiles = {}         # {name: werte} aus der config.conf
+        self._active_profile = ""
         apply_window_icon(self)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -123,6 +128,31 @@ class SetupWindow(Gtk.Window):
         self.media_hint.set_markup("<small>Z.B. „4x6“. Vorausgewählt ist, was der Drucker meldet "
                                    "– in der Regel einfach übernehmen.</small>")
         form.attach(self.media_hint, 1, row, 2, 1)
+        row += 1
+
+        # --- Profil ---
+        self._profiles, initial_profile = gh.read_profiles(CONFIG_FILE)
+        add_label("<b>Profil</b> (Kalibrier-Satz):", row)
+        self.profile_combo = Gtk.ComboBoxText()
+        self.profile_combo.set_hexpand(True)
+        self.profile_combo.connect("changed", self.on_profile_changed)
+        form.attach(self.profile_combo, 1, row, 1, 1)
+        profile_btns = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        profile_new = Gtk.Button(label="Als neues Profil…")
+        profile_new.connect("clicked", self.on_new_profile_clicked)
+        profile_btns.pack_start(profile_new, False, False, 0)
+        profile_del = Gtk.Button(label="Löschen")
+        profile_del.connect("clicked", self.on_delete_profile_clicked)
+        profile_btns.pack_start(profile_del, False, False, 0)
+        form.attach(profile_btns, 2, row, 1, 1)
+        row += 1
+        self.profile_hint = Gtk.Label(xalign=0)
+        self.profile_hint.set_markup(
+            "<small>„Standard“ = Werks-Kalibrierung. Profilwechsel lädt dessen Werte "
+            "(Etikettengröße, Zuschnitt, Position der Marke) – übernehmen mit "
+            "„Einstellungen aktualisieren“.</small>")
+        self.profile_hint.set_line_wrap(True)
+        form.attach(self.profile_hint, 1, row, 2, 1)
         row += 1
 
         # --- Etikettengröße ---
@@ -237,6 +267,7 @@ class SetupWindow(Gtk.Window):
         log_frame.add(scroll)
         outer.pack_start(log_frame, True, True, 4)
 
+        self._set_profile_choices(initial_profile)
         self.refresh_installed_state()
 
         self.load_printers()
@@ -258,12 +289,29 @@ class SetupWindow(Gtk.Window):
 
     def apply_installed_config(self):
         """Software ist schon installiert: Banner zeigen, Button umbenennen,
-        Formular mit den aktuellen Werten vorbelegen."""
+        Formular mit den aktuellen Werten vorbelegen (aktives Profil bzw.
+        Werks-Werte, falls eine alte Config nie kalibriert wurde)."""
         cfg = self.installed_cfg or {}
-        target = (cfg.get("target_size_mm") or "").strip()
-        _def = gh.load_defaults()
-        self.target_entry.set_text(target if target else
-                                   (_def.get("target_size_mm") or "100x150"))
+        self._profiles, active = gh.read_profiles(CONFIG_FILE)
+        values, selected, hinweis = gh.resolve_startup_values(
+            cfg, self._profiles, active)
+        self._building = True
+        try:
+            self._set_profile_choices(selected)
+        finally:
+            self._building = False
+        self.target_entry.set_text(values.get("target_size_mm") or "")
+        for entry, key in ((self.trim_top, "trim_top_mm"),
+                           (self.trim_bottom, "trim_bottom_mm"),
+                           (self.trim_left, "trim_left_mm"),
+                           (self.trim_right, "trim_right_mm")):
+            entry.set_text(trim_display_text(values.get(key)))
+        if (values.get("side") or "top") == "bottom":
+            self.side_bottom.set_active(True)
+        else:
+            self.side_top.set_active(True)
+        if hinweis:
+            self.log("Hinweis: " + hinweis)
         if (cfg.get("watch_mode") or "downloads") == "custom":
             self.mode_custom.set_active(True)
         else:
@@ -275,13 +323,6 @@ class SetupWindow(Gtk.Window):
                 self.folder_btn.set_current_folder(cfg["watch_dir"])
             except Exception:
                 pass
-        if (cfg.get("side") or "top") == "bottom":
-            self.side_bottom.set_active(True)
-        for entry, key in ((self.trim_top, "trim_top_mm"),
-                           (self.trim_bottom, "trim_bottom_mm"),
-                           (self.trim_left, "trim_left_mm"),
-                           (self.trim_right, "trim_right_mm")):
-            entry.set_text(trim_display_text(cfg.get(key)))
         self.install_btn.set_label("Einstellungen aktualisieren")
         self.status_label.set_markup(
             '<span foreground="green"><b>✓ Bereits installiert</b></span> – '
@@ -290,6 +331,167 @@ class SetupWindow(Gtk.Window):
             "es wird nichts neu heruntergeladen, nur aktualisiert, und der Hintergrunddienst "
             "startet direkt mit den neuen Werten. Zum Entfernen dient der rote Knopf "
             "„Deinstallieren…“.")
+
+    # ------------------------------------------------------------- Profile
+
+    def _set_profile_choices(self, selected):
+        """Profil-Dropdown füllen (Standard zuerst) und Auswahl setzen."""
+        self._building = True
+        try:
+            self.profile_combo.remove_all()
+            for name in self._profiles:
+                self.profile_combo.append_text(name)
+            names = list(self._profiles)
+            self.profile_combo.set_active(
+                names.index(selected) if selected in names else -1)
+        finally:
+            self._building = False
+
+    def on_profile_changed(self, combo):
+        """Anderes Profil gewählt: dessen Werte ins Formular laden (nicht
+        speichern – das macht „Einstellungen aktualisieren“)."""
+        if getattr(self, "_building", False):
+            return
+        name = self.profile_combo.get_active_text()
+        if not name or name not in self._profiles:
+            return
+        values = self._profiles[name]
+        self.target_entry.set_text(values.get("target_size_mm") or "")
+        for entry, key in ((self.trim_top, "trim_top_mm"),
+                           (self.trim_bottom, "trim_bottom_mm"),
+                           (self.trim_left, "trim_left_mm"),
+                           (self.trim_right, "trim_right_mm")):
+            entry.set_text(trim_display_text(values.get(key)))
+        if (values.get("side") or "").lower() == "bottom":
+            self.side_bottom.set_active(True)
+        else:
+            self.side_top.set_active(True)
+        self.log(f"Profil „{name}“ geladen – übernehmen mit "
+                 "„Einstellungen aktualisieren“.")
+
+    def _validated_profile_values(self):
+        """Profil-Werte aus dem Formular (validiert); bei Eingabefehler None."""
+        try:
+            trim_top = gh.parse_trim_mm(self.trim_top.get_text())
+            trim_bottom = gh.parse_trim_mm(self.trim_bottom.get_text())
+            trim_left = gh.parse_trim_mm(self.trim_left.get_text())
+            trim_right = gh.parse_trim_mm(self.trim_right.get_text())
+            target = self.target_entry.get_text().strip()
+            if target:
+                gh.parse_size_mm(target)
+        except ValueError as exc:
+            self.show_error(str(exc))
+            return None
+        return {
+            "side": "bottom" if self.side_bottom.get_active() else "top",
+            "trim_top_mm": f"{trim_top:g}",
+            "trim_bottom_mm": f"{trim_bottom:g}",
+            "trim_left_mm": f"{trim_left:g}",
+            "trim_right_mm": f"{trim_right:g}",
+            "target_size_mm": target,
+            "rotate": "auto",  # Rotation wird von der GUI immer auf auto gesetzt
+        }
+
+    def _ask_profile_name(self):
+        """Kleiner Eingabe-Dialog: Name für ein neues Profil (oder None)."""
+        dlg = Gtk.Dialog(title="Neues Profil", transient_for=self, flags=0)
+        dlg.add_buttons("Abbrechen", Gtk.ResponseType.CANCEL,
+                        "Speichern", Gtk.ResponseType.OK)
+        dlg.set_default_size(380, 110)
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(10)
+        label = Gtk.Label(label="Name des neuen Profils (z.B. „Zweit-Drucker“):")
+        entry = Gtk.Entry()
+        entry.set_activates_default(True)
+        box.pack_start(label, False, False, 0)
+        box.pack_start(entry, False, False, 0)
+        dlg.show_all()
+        answer = dlg.run()
+        name = entry.get_text().strip()
+        dlg.destroy()
+        return name if answer == Gtk.ResponseType.OK else None
+
+    def on_new_profile_clicked(self, btn):
+        """Aktuelle Formular-Werte als neues Profil speichern und aktiv setzen."""
+        if self.installing or self.uninstalling:
+            return
+        name = self._ask_profile_name()
+        if not name:
+            return
+        if name.lower() == gh.FACTORY_PROFILE.lower():
+            self.show_error("„Standard“ ist das Werks-Profil und ist immer "
+                            "vorhanden – bitte einen eigenen Namen wählen.")
+            return
+        if not gh.valid_profile_name(name):
+            self.show_error("Bitte einen Namen mit höchstens 40 Zeichen "
+                            "ohne [ ] : = verwenden.")
+            return
+        if any(name.lower() == existing.lower() for existing in self._profiles):
+            self.show_error(f"Profil „{name}“ gibt es schon.\n\nProfil oben "
+                            "auswählen und „Einstellungen aktualisieren“ "
+                            "klicken, um es mit den angezeigten Werten zu "
+                            "überschreiben.")
+            return
+        values = self._validated_profile_values()
+        if values is None:
+            return
+        try:
+            gh.upsert_profile(CONFIG_FILE, name, values, activate=True)
+        except Exception as exc:
+            self.show_error(f"Profil konnte nicht gespeichert werden: {exc}")
+            return
+        self._profiles[name] = values
+        self._set_profile_choices(name)
+        self.log(f"Profil „{name}“ gespeichert und als aktives Profil gesetzt.")
+        if self.installed_cfg:
+            rc, _out = gh.run_cmd(
+                ["systemctl", "--user", "restart", "dhl-label.service"])
+            if rc == 0:
+                self.log("Hintergrunddienst neu gestartet – das Profil ist aktiv.")
+            else:
+                self.log("Achtung: Dienst-Neustart fehlgeschlagen "
+                         f"(rc={rc}). Falls nötig im Terminal: "
+                         "systemctl --user restart dhl-label")
+        else:
+            self.log("Das Profil wird mit „Installation starten“ übernommen.")
+
+    def on_delete_profile_clicked(self, btn):
+        """Gewähltes Profil aus der config.conf entfernen (Standard bleibt)."""
+        if self.installing or self.uninstalling:
+            return
+        name = self.profile_combo.get_active_text()
+        if not name:
+            self.show_error("Bitte zuerst ein Profil auswählen.")
+            return
+        if name == gh.FACTORY_PROFILE:
+            self.show_error("Das Werks-Profil „Standard“ kann nicht gelöscht "
+                            "werden – seine Werte kannst du ändern und mit "
+                            "„Einstellungen aktualisieren“ speichern.")
+            return
+        dlg = Gtk.MessageDialog(transient_for=self, flags=0,
+                                message_type=Gtk.MessageType.QUESTION,
+                                buttons=Gtk.ButtonsType.YES_NO,
+                                text=f"Profil „{name}“ löschen?")
+        dlg.set_secondary_text(
+            "Die Werte im Formular bleiben unverändert.")
+        answer = dlg.run()
+        dlg.destroy()
+        if answer != Gtk.ResponseType.YES:
+            return
+        try:
+            removed = gh.delete_profile(CONFIG_FILE, name)
+        except Exception as exc:
+            self.show_error(f"Profil konnte nicht gelöscht werden: {exc}")
+            return
+        if not removed:
+            self.show_error(f"Profil „{name}“ war nicht in den Einstellungen "
+                            "gespeichert.")
+            return
+        self._profiles.pop(name, None)
+        self._set_profile_choices("")
+        self.log(f"Profil „{name}“ gelöscht – Formular unverändert.")
 
     def log(self, text):
         buf = self.log_view.get_buffer()
@@ -413,7 +615,8 @@ class SetupWindow(Gtk.Window):
             INSTALL_SH, printer=printer, media=media, target=target,
             watch_mode=watch_mode, watch_dir=watch_dir, pattern=pattern, side=side,
             trim_top=trim_top, trim_bottom=trim_bottom,
-            trim_left=trim_left, trim_right=trim_right)
+            trim_left=trim_left, trim_right=trim_right,
+            profile=self.profile_combo.get_active_text() or "")
 
         self.log(f"$ {' '.join(cmd)}\n")
 
@@ -560,6 +763,10 @@ class CalibrationWindow(Gtk.Window):
         self.printer = cfg["printer"]
         self.media = cfg["media"]
         self.extra_options = cfg["extra_options"]
+        # Profil-Bestand merken („Werte speichern“ darf keine Profile löschen)
+        self._profiles, self._active_profile = gh.read_profiles(CONFIG_FILE)
+        self._active_profile = (self.cfg.get("profile") or "").strip() \
+            or self._active_profile
         self.venv_python = APP_DIR / "venv" / "bin" / "python"
         self.dhl_label_py = APP_DIR / "dhl_label.py"
 
@@ -747,13 +954,33 @@ class CalibrationWindow(Gtk.Window):
         dlg.set_secondary_text(
             f"oben {trim_top:g} · unten {trim_bottom:g} · links {trim_left:g} · "
             f"rechts {trim_right:g} mm\n\n"
-            "Es wird die Konfiguration geschrieben und der Hintergrunddienst neu "
+            + (f"Aktives Profil: „{(self._active_profile or '').strip()}“ "
+               "wird mit diesen Werten aktualisiert.\n\n"
+               if (self._active_profile or "").strip() else "")
+            + "Es wird die Konfiguration geschrieben und der Hintergrunddienst neu "
             "gestartet – danach druckt der Watcher mit diesen Werten. "
             "(Kein Testdruck – es wird kein Etikett verbraucht.)")
         answer = dlg.run()
         dlg.destroy()
         if answer != Gtk.ResponseType.YES:
             return
+
+        # Aktives Profil mit den neuen Werten synchronisieren (Bestand der
+        # übrigen Profile bleibt erhalten)
+        profile_name = (self._active_profile or "").strip()
+        profiles = dict(self._profiles)
+        if profile_name:
+            values = dict(profiles.get(profile_name) or {})
+            values.update({
+                "side": self.cfg.get("side") or "top",
+                "trim_top_mm": f"{trim_top:g}",
+                "trim_bottom_mm": f"{trim_bottom:g}",
+                "trim_left_mm": f"{trim_left:g}",
+                "trim_right_mm": f"{trim_right:g}",
+                "target_size_mm": self.cfg.get("target_size_mm") or "",
+            })
+            values.setdefault("rotate", "auto")
+            profiles[profile_name] = gh.normalize_profile_values(values)
 
         self.busy = True
         self.print_btn.set_sensitive(False)
@@ -772,7 +999,10 @@ class CalibrationWindow(Gtk.Window):
                     filename_pattern=self.cfg.get("filename_pattern") or "",
                     side=self.cfg.get("side") or "top",
                     trim_top_mm=trim_top, trim_bottom_mm=trim_bottom,
-                    trim_left_mm=trim_left, trim_right_mm=trim_right)
+                    trim_left_mm=trim_left, trim_right_mm=trim_right,
+                    profile=profile_name,
+                    profiles=profiles)
+                self._profiles = profiles
                 ui(self.log, f"Konfiguration geschrieben: {CONFIG_FILE}")
                 rc, _outp = gh.run_cmd(
                     ["systemctl", "--user", "restart", "dhl-label.service"])

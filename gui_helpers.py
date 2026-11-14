@@ -152,8 +152,13 @@ def parse_trim_mm(text):
 
 def build_install_cmd(install_sh, *, printer, media, target, watch_mode,
                       watch_dir, pattern, side,
-                      trim_top=0.0, trim_bottom=0.0, trim_left=0.0, trim_right=0.0):
-    """Baut die Kommandozeile für install.sh (nicht-interaktiver Modus)."""
+                      trim_top=0.0, trim_bottom=0.0, trim_left=0.0, trim_right=0.0,
+                      profile=""):
+    """Baut die Kommandozeile für install.sh (nicht-interaktiver Modus).
+
+    profile: aktives Profil; nur bei gesetztem Namen wird --profile übergeben
+    (leer = install.sh entscheidet: aktives Profil der alten Config, sonst
+    „Standard“)."""
     cmd = ["bash", str(install_sh),
            "--printer", printer,
            "--media", media,
@@ -165,11 +170,264 @@ def build_install_cmd(install_sh, *, printer, media, target, watch_mode,
            "--watch-mode", watch_mode,
            "--watch-dir", watch_dir,
            "--pattern", pattern,
-           "--side", side,
-           "--no-calibrate",
-           "--pkexec",
-           "--non-interactive"]
+           "--side", side]
+    if (profile or "").strip():
+        cmd += ["--profile", profile.strip()]
+    cmd += ["--no-calibrate", "--pkexec", "--non-interactive"]
     return cmd
+
+
+# ------------------------------------------------------------------ Profile
+#
+# Profile sind gespeicherte Kalibrier-Sätze (Etikettengröße, Zuschnitt,
+# Position der Marke, Rotation) in der config.conf – je eine Sektion
+# [profile:NAME]. Das Profil „Standard“ enthält die Werks-Kalibrierung
+# (defaults.conf) und ist immer vorhanden. Die WIRKSAMEN Werte liegen
+# weiterhin in [crop] – ein Profilwechsel kopiert die Werte dorthin.
+
+FACTORY_PROFILE = "Standard"      # Werks-Profil (nie löschbar/umbenennbar)
+PROFILE_PREFIX = "profile:"       # Sektions-Präfix in der config.conf
+PROFILE_KEYS = ("side", "trim_top_mm", "trim_bottom_mm", "trim_left_mm",
+                "trim_right_mm", "target_size_mm", "rotate")
+_TRIM_KEYS = ("trim_top_mm", "trim_bottom_mm", "trim_left_mm", "trim_right_mm")
+
+
+def valid_profile_name(name):
+    """Profilname für eine config.conf-Sektion zulässig? (max. 40 Zeichen,
+    keine Sondersyntax [ ] : = , keine Steuerzeichen)."""
+    name = (name or "").strip()
+    if not name or len(name) > 40:
+        return False
+    for ch in "[]:=\r\n\t":
+        if ch in name:
+            return False
+    return True
+
+
+def normalize_profile_values(raw):
+    """Profil-Werte vervollständigen/formatieren: alle PROFILE_KEYS als
+    Strings, Zuschnitt numerisch formatiert („16,24“ → „16.24“), fehlende
+    side/rotate → top/auto. Nie werfen – für GUI-Vorbefüllung."""
+    values = {}
+    for key in PROFILE_KEYS:
+        value = str((raw or {}).get(key, "") or "").strip()
+        if key in _TRIM_KEYS:
+            try:
+                value = f"{float(value.replace(',', '.')):g}" if value else "0"
+            except ValueError:
+                value = "0"
+        values[key] = value
+    if not values["side"]:
+        values["side"] = "top"
+    if not values["rotate"]:
+        values["rotate"] = "auto"
+    return values
+
+
+def factory_profile_values():
+    """Werks-Kalibrierung (defaults.conf) als Profil-Werte; None, wenn die
+    Datei fehlt/unlesbar ist."""
+    defaults = load_defaults()
+    if not defaults:
+        return None
+    return normalize_profile_values(defaults)
+
+
+def trims_are_zero(values):
+    """Sind alle vier Zuschnitt-Werte 0 (= nie kalibriert)?"""
+    for key in _TRIM_KEYS:
+        try:
+            if abs(float(str((values or {}).get(key, "0")).replace(",", "."))) > 1e-9:
+                return False
+        except (ValueError, TypeError):
+            return False
+    return True
+
+
+def profile_values_equal(a, b):
+    """Zwei Profil-Wert-Sätze inhaltlich gleich? (Zuschnitt numerisch,
+    side/rotate groß-/klein-unabhängig, Zielgröße „“ == „0“.)"""
+    a = normalize_profile_values(a)
+    b = normalize_profile_values(b)
+    for key in PROFILE_KEYS:
+        va, vb = a[key], b[key]
+        if key in _TRIM_KEYS:
+            try:
+                equal = abs(float(va.replace(",", ".")) -
+                            float(vb.replace(",", "."))) < 1e-9
+            except ValueError:
+                equal = va == vb
+            if not equal:
+                return False
+        elif key in ("side", "rotate"):
+            if va.lower() != vb.lower():
+                return False
+        else:  # target_size_mm
+            try:
+                if parse_size_mm(va) != parse_size_mm(vb):
+                    return False
+            except ValueError:
+                if va != vb:
+                    return False
+    return True
+
+
+def read_profiles(path=None):
+    """Profile aus der config.conf lesen → ({name: werte}, aktiver Name).
+
+    Das Werks-Profil „Standard“ fehlt nie: fehlt es in der Datei, wird es
+    aus defaults.conf (oder neutral) ergänzt und steht in der Liste zuerst.
+    Datei fehlt/unlesbar → ({Standard: Werks-Werte}, "")."""
+    import configparser
+
+    p = Path(path) if path else default_config_path()
+    profiles = {}
+    active = ""
+    try:
+        cp = configparser.ConfigParser()
+        cp.read(str(p), encoding="utf-8")
+        if cp.has_section("crop"):
+            active = (cp["crop"].get("profile", "") or "").strip()
+        for section in cp.sections():
+            if not section.startswith(PROFILE_PREFIX):
+                continue
+            name = section[len(PROFILE_PREFIX):].strip()
+            if valid_profile_name(name) and len(cp.options(section)) > 0:
+                profiles[name] = normalize_profile_values(dict(cp[section]))
+    except Exception:
+        profiles = {}
+        active = ""
+    if FACTORY_PROFILE not in profiles:
+        factory = factory_profile_values()
+        profiles[FACTORY_PROFILE] = factory if factory is not None \
+            else normalize_profile_values({})
+    ordered = {FACTORY_PROFILE: profiles[FACTORY_PROFILE]}
+    for name, values in profiles.items():
+        if name != FACTORY_PROFILE:
+            ordered[name] = values
+    return ordered, active
+
+
+def resolve_startup_values(crop_values, profiles, active):
+    """Welche Werte sollen beim GUI-Start im Formular stehen?
+
+    Behebt das „Zweit-PC zeigt überall 0“-Problem: eine config.conf, die vor
+    v1.2.0 geschrieben wurde, enthielt nie die Werks-Kalibrierung. Regeln:
+      1. Aktives Profil vorhanden → dessen Werte.
+      2. Kein Profil, aber [crop] entspricht der Werks-Kalibrierung → Standard.
+      3. Kein Profil und unkalibriert (alle Zuschnitte 0) → Werks-Werte
+         vorausfüllen (mit Hinweis).
+      4. Sonst → aktuelle [crop]-Werte, keine Profil-Auswahl (mit Hinweis).
+
+    → (werte, ausgewählter Profilname (oder ""), Hinweis (oder None))"""
+    active = (active or "").strip()
+    if active and active in profiles:
+        return dict(profiles[active]), active, None
+    current = normalize_profile_values(crop_values)
+    standard = profiles.get(FACTORY_PROFILE)
+    if standard is None:
+        standard = factory_profile_values() or normalize_profile_values({})
+    if profile_values_equal(current, standard):
+        return dict(standard), FACTORY_PROFILE, None
+    if trims_are_zero(current):
+        return (dict(standard), FACTORY_PROFILE,
+                "Alte Einstellungen gefunden (Zuschnitt überall 0) – die "
+                "Werks-Kalibrierung ist vorausgefüllt. Übernehmen mit "
+                "„Einrichten“ bzw. „Einstellungen aktualisieren“.")
+    return (current, "",
+            "Diese Einstellungen sind noch kein Profil – oben ein Profil "
+            "wählen oder „Als neues Profil speichern…“ klicken.")
+
+
+def _profile_section_lines(name, values):
+    """Zeilen einer [profile:NAME]-Sektion (inkl. Kopfzeile)."""
+    values = normalize_profile_values(values)
+    return [f"[{PROFILE_PREFIX}{name}]"] + \
+        [f"{key} = {values[key]}" for key in PROFILE_KEYS]
+
+
+def _load_config_parser(path):
+    """config.conf als ConfigParser lesen (fehlt die Datei → leerer Parser)."""
+    import configparser
+
+    cp = configparser.ConfigParser()
+    cp.read(str(path), encoding="utf-8")
+    return cp
+
+
+def _write_config_parser(path, cp):
+    """ConfigParser BOM-frei mit LF zurückschreiben (Kopf-Kommentar)."""
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with open(target, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write("# DHL-Etikettensoftware – Konfiguration\n")
+        cp.write(fh)
+
+
+def _set_active_profile_in_parser(cp, name, values):
+    """[crop] auf ein Profil setzen (Werte kopieren + profile = NAME)."""
+    if not cp.has_section("crop"):
+        cp.add_section("crop")
+    for key in PROFILE_KEYS:
+        cp["crop"][key] = values[key]
+    cp["crop"]["profile"] = name
+
+
+def set_active_profile(path, name):
+    """Profil wechseln (auch ohne GUI): Werte des Profils nach [crop]
+    kopieren und profile = NAME setzen. Der Watcher/Dienst übernimmt die
+    Werte beim nächsten Neustart. ValueError bei unbekanntem Profil."""
+    name = (name or "").strip()
+    p = Path(path) if path else default_config_path()
+    profiles, _active = read_profiles(str(p))
+    if name not in profiles:
+        known = ", ".join(profiles) or "(keine)"
+        raise ValueError(f"Unbekanntes Profil: {name!r} (vorhanden: {known})")
+    cp = _load_config_parser(p)
+    _set_active_profile_in_parser(cp, name, profiles[name])
+    _write_config_parser(p, cp)
+    return profiles[name]
+
+
+def upsert_profile(path, name, values, activate=False):
+    """Profil anlegen/überschreiben; activate=True macht es zusätzlich zum
+    aktiven Profil (Werte wandern nach [crop] – Dienst-Neustart nötig)."""
+    name = (name or "").strip()
+    if not valid_profile_name(name):
+        raise ValueError(
+            f"Unzulässiger Profilname: {name!r} (max. 40 Zeichen, ohne [ ] : =)")
+    p = Path(path) if path else default_config_path()
+    cp = _load_config_parser(p)
+    section = PROFILE_PREFIX + name
+    if not cp.has_section(section):
+        cp.add_section(section)
+    norm = normalize_profile_values(values)
+    for key in PROFILE_KEYS:
+        cp[section][key] = norm[key]
+    if activate:
+        _set_active_profile_in_parser(cp, name, norm)
+    _write_config_parser(p, cp)
+    return norm
+
+
+def delete_profile(path, name):
+    """Profil-Sektion aus der config.conf entfernen → True, wenn entfernt.
+    War es das aktive Profil, wird [crop] profile geleert (die Werte selbst
+    bleiben erhalten). Das Werks-Profil „Standard“ wird NICHT gelöscht."""
+    name = (name or "").strip()
+    if not name or name == FACTORY_PROFILE:
+        return False
+    p = Path(path) if path else default_config_path()
+    if not p.exists():
+        return False
+    cp = _load_config_parser(p)
+    removed = cp.remove_section(PROFILE_PREFIX + name)
+    if removed and cp.has_section("crop"):
+        if (cp["crop"].get("profile", "") or "").strip() == name:
+            cp["crop"]["profile"] = ""
+    if removed:
+        _write_config_parser(p, cp)
+    return removed
 
 
 def calibration_variants():
@@ -227,9 +485,14 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
                       filename_pattern="versand|dhl|paket", side="top",
                       trim_top_mm=0.0, trim_bottom_mm=0.0,
                       trim_left_mm=0.0, trim_right_mm=0.0,
-                      extra_options="", processed_dirname="gedruckt"):
+                      extra_options="", processed_dirname="gedruckt",
+                      profile="", profiles=None):
     """Schreibt config.conf im selben Format wie install.sh (UTF-8 ohne BOM,
-    LF-Zeilenenden). Wird von der Windows-GUI genutzt."""
+    LF-Zeilenenden). Wird von der Windows-GUI und der GTK-Kalibrierung genutzt.
+
+    profile: aktives Profil → [crop] profile = NAME (leer = kein Profil).
+    profiles: {Name: Werte} – wird als [profile:NAME]-Sektionen hinten
+    angehängt (None = keine); die GUI übergibt hier immer den Bestand."""
     lines = [
         "# DHL-Etikettensoftware – Konfiguration",
         "# (Diese Datei verwaltet die Setup-GUI; manuelle Änderungen möglich.)",
@@ -240,6 +503,10 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
         f"extra_options = {extra_options}",
         "",
         "[crop]",
+    ]
+    if (profile or "").strip():
+        lines.append(f"profile = {profile.strip()}")
+    lines += [
         f"side = {side}",
         f"trim_top_mm = {trim_top_mm}",
         f"trim_bottom_mm = {trim_bottom_mm}",
@@ -257,8 +524,14 @@ def write_config_file(path, *, printer, media, target_size_mm="100x150",
         f"processed_dirname = {processed_dirname}",
         "poll_seconds = 2.0",
         "process_existing = false",
-        "",
     ]
+    for name, values in (profiles or {}).items():
+        name = (name or "").strip()
+        if not valid_profile_name(name):
+            continue
+        lines.append("")
+        lines += _profile_section_lines(name, values)
+    lines.append("")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with open(target, "w", encoding="utf-8", newline="\n") as fh:
@@ -293,6 +566,7 @@ def read_installed_config(path=None):
         "filename_pattern": get("watch", "filename_pattern", default=""),
         "target_size_mm": get("crop", "target_size_mm"),
         "side": get("crop", "side", default="top"),
+        "profile": get("crop", "profile"),
         "trim_top_mm": get("crop", "trim_top_mm", default="0"),
         "trim_bottom_mm": get("crop", "trim_bottom_mm", default="0"),
         "trim_left_mm": get("crop", "trim_left_mm", default="0"),

@@ -11,6 +11,7 @@ Modi:
   crop IN [OUT]         Croppt nur (Test/Vorschau), ohne zu drucken
   calibrate             Interaktive Kalibrierungsdrucke
   show-config           Zeigt die effektive Konfiguration an
+  profiles [NAME]       Profile listen bzw. Profil NAME aktivieren
   printers              Listet Drucker auf (CUPS bzw. Windows-Druckertreiber)
   setup                 Windows: Setup-GUI öffnen (auch bei Start ohne Argument)
 
@@ -35,6 +36,7 @@ import time
 from pathlib import Path
 
 from gui_helpers import default_config_path
+import gui_helpers as gh
 
 MM_TO_PT = 72.0 / 25.4
 
@@ -106,6 +108,7 @@ class Config:
 
         c = cp["crop"] if cp.has_section("crop") else configparser.SectionProxy(cp, "crop")
         self.side = c.get("side", fallback="top").lower()          # top | bottom | full
+        self.profile = c.get("profile", fallback="").strip()       # aktives Profil (optional)
         self.trim_top_mm = c.getfloat("trim_top_mm", fallback=0.0)
         self.trim_bottom_mm = c.getfloat("trim_bottom_mm", fallback=0.0)
         self.trim_left_mm = c.getfloat("trim_left_mm", fallback=0.0)
@@ -127,7 +130,7 @@ class Config:
         target = f"{self.target_mm[0]:g}x{self.target_mm[1]:g}mm" if self.target_mm else "aus (nur croppen)"
         return (
             f"printer={self.printer!r} media={self.media!r} lp_extra={self.lp_extra!r}\n"
-            f"crop: side={self.side} trim_top={self.trim_top_mm}mm "
+            f"crop: profil={self.profile or '(keins)'} side={self.side} trim_top={self.trim_top_mm}mm "
             f"trim_bottom={self.trim_bottom_mm}mm "
             f"trim_left={self.trim_left_mm}mm trim_right={self.trim_right_mm}mm "
             f"page={self.page_index} gs={self.use_ghostscript}\n"
@@ -396,7 +399,8 @@ def watch(cfg, process_existing=False):
     target = (f"{cfg.target_mm[0]:g}x{cfg.target_mm[1]:g} mm"
               if getattr(cfg, "target_mm", None) else "aus (nur croppen)")
     log(f"Einstellungen: Drucker {cfg.printer!r} · Medium {cfg.media!r} · "
-        f"Ziel {target} · Zuschnitt oben/unten/links/rechts = "
+        f"Profil {cfg.profile or '(keins)'} · Ziel {target} · "
+        f"Zuschnitt oben/unten/links/rechts = "
         f"{cfg.trim_top_mm:g}/{cfg.trim_bottom_mm:g}/"
         f"{cfg.trim_left_mm:g}/{cfg.trim_right_mm:g} mm")
     # Frühwarnung: wenn der Druckername nicht existiert, landet JEDE PDF nach
@@ -587,6 +591,8 @@ def cmd_calibrate(args, cfg):
     log("  [crop] trim_left_mm / trim_right_mm  → Bereich links/rechts eingrenzen")
     log("  [crop] target_size_mm (z.B. 100x150) → exakte Etikettengröße")
     log("  [crop] rotate (auto/90/270)          → falls die Marke verkehrt herum steht")
+    log("Tipp: In der Setup-GUI kannst du getestete Werte als Profil speichern")
+    log("      (Auswahl „Profil“) – Liste/Wechsel auch per 'dhl-label profiles'.")
     log("Tipp: 'dhl-label crop DATEI.pdf' erzeugt ohne Druck eine Vorschau-PDF.")
 
 
@@ -598,6 +604,51 @@ def cmd_show_config(args, cfg):
 
         show_text_dialog("DHL-Etikettensoftware – Konfiguration",
                          f"Konfigurationsdatei: {CONFIG_PATH}\n\n{cfg}")
+
+
+def cmd_profiles(args, cfg):
+    """Profile anzeigen oder wechseln (funktioniert auch ohne cfg=None-Pfad):
+    'dhl-label profiles'           → alle Profile listen (* = aktiv)
+    'dhl-label profiles NAME'      → NAME zum aktiven Profil machen"""
+    profiles, active = gh.read_profiles(CONFIG_PATH)
+    lines = [f"Konfigurationsdatei: {CONFIG_PATH}", ""]
+    if args.name:
+        name = args.name.strip()
+        if not CONFIG_PATH.exists():
+            raise SystemExit(
+                f"Keine Konfiguration gefunden: {CONFIG_PATH}\n"
+                + ("Bitte zuerst das Setup starten (dhl-label setup)."
+                   if os.name == "nt" else
+                   "Bitte zuerst install.sh ausführen."))
+        if name not in profiles:
+            raise SystemExit(
+                f"Unbekanntes Profil: {name!r} – vorhanden: "
+                + (", ".join(profiles) or "(keine)"))
+        gh.set_active_profile(CONFIG_PATH, name)
+        lines.append(f"Aktives Profil: {name}")
+        lines.append("Die Werte wurden in [crop] übernommen. Damit sie wirksam "
+                     "werden, den Watcher/Dienst neu starten:")
+        lines.append("  Windows: GUI-Knopf „Watcher … – neu starten“")
+        lines.append("  Linux:   systemctl --user restart dhl-label")
+    else:
+        lines.append("Profile:")
+        for name, values in profiles.items():
+            mark = "*" if name == active else " "
+            trims = "/".join(values[key] for key in
+                             ("trim_top_mm", "trim_bottom_mm",
+                              "trim_left_mm", "trim_right_mm"))
+            groesse = values["target_size_mm"] or "aus (nur croppen)"
+            lines.append(f" {mark} {name}: Zuschnitt {trims} mm · "
+                         f"Größe {groesse} · Position {values['side']} · "
+                         f"Rotation {values['rotate']}")
+        lines.append("")
+        lines.append("Wechseln: dhl-label profiles NAME   (* = aktiv)")
+    for line in lines:
+        log(line)
+    if sys.stdout is None:  # windowed-EXE: Ergebnis auch als Dialog zeigen
+        from win_backend import show_text_dialog
+
+        show_text_dialog("DHL-Etikettensoftware – Profile", "\n".join(lines))
 
 
 def cmd_print_pdf(args, cfg):
@@ -721,12 +772,18 @@ def main():
     sc = sub.add_parser("show-config", help="Konfiguration anzeigen")
     sc.set_defaults(func=cmd_show_config)
 
+    prf = sub.add_parser("profiles",
+                         help="Profile anzeigen oder wechseln (NAME angeben)")
+    prf.add_argument("name", nargs="?", default=None,
+                     help="Profilname, der aktiviert werden soll")
+    prf.set_defaults(func=cmd_profiles)
+
     pd = sub.add_parser("printers", help="CUPS-Drucker (USB/WLAN) auflisten")
     pd.set_defaults(func=cmd_printers)
 
     args = parser.parse_args()
     try:
-        if args.command == "printers":
+        if args.command in ("printers", "profiles"):
             args.func(args, None)  # funktioniert auch ohne config.conf
             return
         if args.command is None or args.command == "setup":

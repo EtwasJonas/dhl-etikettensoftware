@@ -177,6 +177,8 @@ dhl-label crop IN [OUT]      # Nur croppen/einpassen, als Vorschau-PDF speichern
 dhl-label calibrate [PDF]    # Kalibrierungsdrucke erzeugen (jede mit Bestätigung)
 dhl-label print-pdf DATEI.pdf # Fertig aufbereitete PDF direkt drucken (ohne Crop)
 dhl-label show-config        # Effektive Konfiguration anzeigen
+dhl-label profiles           # Profile listen (* = aktives Profil)
+dhl-label profiles NAME      # Profil NAME aktivieren (danach Dienst neu starten)
 dhl-label printers           # Drucker (USB/WLAN) mit Verbindungsart auflisten
 ```
 
@@ -192,6 +194,8 @@ dhl-label.exe crop IN [OUT]
 dhl-label.exe calibrate [PDF]
 dhl-label.exe print-pdf DATEI.pdf
 dhl-label.exe show-config    # Ausgabe auch als Dialogfenster
+dhl-label.exe profiles       # Profile als Dialogfenster
+dhl-label.exe profiles NAME  # Profil NAME aktivieren (danach Watcher neu starten)
 dhl-label.exe printers       # Druckerliste als Dialogfenster
 ```
 
@@ -220,6 +224,37 @@ Später prüfen: `dhl-label printers` zeigt jeden Drucker samt Geräte-URI
 (`usb://…` = USB, `ipp://…`/`socket://…`/`dnssd://…` = WLAN/Netzwerk).
 Ändern: Druckername in `~/.config/dhl-label/config.conf` unter `[printer]`
 tauschen, danach `systemctl --user restart dhl-label`.
+
+## Profile
+
+Ein Profil ist ein gespeicherter Satz von Kalibrier-Werten – Etikettengröße,
+Zuschnitt und Position der Marke. In der Setup-GUI (Auswahl **„Profil“**
+direkt über der Etikettengröße) kannst du:
+
+- **Profil wechseln:** Eintrag wählen → die Werte laden ins Formular → mit
+  **„Einstellungen aktualisieren“** (bzw. „Einrichten“) übernehmen.
+- **Neues Profil anlegen:** Werte eintragen → **„Als neues Profil…“** → Name
+  vergeben (z.B. „Zweit-PC“). Praktisch für verschiedene Drucker, Rollen
+  oder Testwerte.
+- **Profil löschen:** Eintrag wählen → **„Löschen“**.
+
+Das Profil **„Standard“** ist immer vorhanden und enthält die
+**Werks-Kalibrierung** (auf einem Vretti SN 420B verifiziert: Zuschnitt
+16,24 / 16,66 / 3,08 / 4,13 mm, Etikettengröße 101,6 × 152,4 mm, Marke oben).
+Es kann nicht gelöscht werden – seine Werte kannst du aber ändern und mit
+„Einstellungen aktualisieren“ speichern.
+
+Gut zu wissen:
+
+- Die **wirksamen** Werte liegen weiterhin unter `[crop]` in der config.conf.
+  Ein Profilwechsel kopiert die Werte des Profils dorthin – der
+  Hintergrunddienst liest nur `[crop]`.
+- **Ältere Installationen** (vor v1.2.0, Zuschnitt überall 0): Die GUI
+  erkennt das und füllt automatisch die Werks-Kalibrierung vor – ein Klick
+  auf „Einstellungen aktualisieren“ genügt, um sie zu übernehmen.
+- Im Terminal (Fallback): `dhl-label profiles` zeigt alle Profile
+  („*“ = aktiv), `dhl-label profiles NAME` aktiviert ein Profil – danach den
+  Dienst/Watcher neu starten.
 
 ## Kalibrierung
 
@@ -271,6 +306,7 @@ media = 4x6                   # Linux: lpoptions -p Vretti -l | Windows: Papierf
 extra_options =               # zusaetzliche lp-Optionen (nur Linux, z.B. "-o landscape")
 
 [crop]
+profile = Standard            # aktives Profil (siehe Abschnitt „Profile“)
 side = top                    # top | bottom | full
 trim_top_mm = 0.0
 trim_bottom_mm = 0.0
@@ -288,6 +324,15 @@ filename_pattern = versand|dhl|paket
 processed_dirname = gedruckt
 poll_seconds = 2.0
 process_existing = false
+
+[profile:Standard]            # Profile (siehe Abschnitt „Profile“)
+side = top
+trim_top_mm = 16.24
+trim_bottom_mm = 16.66
+trim_left_mm = 3.08
+trim_right_mm = 4.13
+target_size_mm = 101.6x152.4
+rotate = auto
 ```
 
 Windows-Zusatz: Bei gesetztem `target_size_mm` wird dem Treiber die

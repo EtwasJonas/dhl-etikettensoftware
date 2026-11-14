@@ -18,6 +18,8 @@
 #   --watch-dir PFAD      zu überwachender Ordner
 #   --pattern REGEX       Namensfilter (downloads-Modus)
 #   --side top|bottom     wo sitzt die Marke im A4-PDF
+#   --profile NAME        aktives Profil (Standard = Werks-Kalibrierung);
+#                         bestehende andere Profile bleiben erhalten
 #   --no-calibrate        Kalibrierungs-Prompt am Ende überspringen (GUI macht das selbst)
 #   --pkexec              apt über pkexec (GUI-Passwortdialog statt sudo-Terminal)
 #   --non-interactive     keine Rückfragen; fehlende Pflicht-Flags = Fehler
@@ -35,7 +37,7 @@ info() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31mFehler:\033[0m %s\n' "$*" >&2; exit 1; }
 
-FLAG_PRINTER="" FLAG_MEDIA="" FLAG_TARGET="" FLAG_WATCH_MODE="" FLAG_WATCH_DIR="" FLAG_PATTERN="" FLAG_SIDE=""
+FLAG_PRINTER="" FLAG_MEDIA="" FLAG_TARGET="" FLAG_WATCH_MODE="" FLAG_WATCH_DIR="" FLAG_PATTERN="" FLAG_SIDE="" FLAG_PROFILE=""
 FLAG_TRIM_TOP="" FLAG_TRIM_BOTTOM="" FLAG_TRIM_LEFT="" FLAG_TRIM_RIGHT=""
 NO_CALIBRATE=0 USE_PKEXEC=0 NONINTERACTIVE=0
 
@@ -56,6 +58,7 @@ while [ $# -gt 0 ]; do
     --watch-dir)      FLAG_WATCH_DIR="${2:-}"; shift 2 ;;
     --pattern)        FLAG_PATTERN="${2:-}";   shift 2 ;;
     --side)           FLAG_SIDE="${2:-}";      shift 2 ;;
+    --profile)        FLAG_PROFILE="${2:-}";   shift 2 ;;
     --no-calibrate)   NO_CALIBRATE=1;          shift ;;
     --pkexec)         USE_PKEXEC=1;            shift ;;
     --non-interactive) NONINTERACTIVE=1;       shift ;;
@@ -90,6 +93,29 @@ TRIM_TOP="$(norm_trim "$FLAG_TRIM_TOP")"
 TRIM_BOTTOM="$(norm_trim "$FLAG_TRIM_BOTTOM")"
 TRIM_LEFT="$(norm_trim "$FLAG_TRIM_LEFT")"
 TRIM_RIGHT="$(norm_trim "$FLAG_TRIM_RIGHT")"
+
+# Aktives Profil: --profile hat Vorrang; sonst das aktive Profil der
+# bestehenden config.conf; sonst „Standard“ (Werks-Kalibrierung).
+if [ -z "$FLAG_PROFILE" ] && [ -f "$CONFIG_FILE" ]; then
+  FLAG_PROFILE="$(awk '/^\[crop\]/{c=1;next} /^\[/{c=0} c && /^profile[[:space:]]*=/{sub(/^profile[[:space:]]*=[[:space:]]*/,"");print;exit}' "$CONFIG_FILE" || true)"
+fi
+PROFILE="$(printf '%s' "${FLAG_PROFILE:-Standard}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+if [ -z "$PROFILE" ]; then
+  PROFILE="Standard"
+fi
+if [ "${#PROFILE}" -gt 40 ] || [[ "$PROFILE" == *[][:=]* ]]; then
+  die "Ungültiger Profilname: '$PROFILE' (max. 40 Zeichen, ohne [ ] : =)"
+fi
+# Bestehende Profil-Sektionen bewahren (außer dem aktiven – der wird frisch
+# geschrieben): 'Einstellungen aktualisieren' darf keine Profile verlieren.
+OLD_PROFILES=""
+if [ -f "$CONFIG_FILE" ]; then
+  OLD_PROFILES="$(awk -v skip="[profile:$PROFILE]" '
+    /^[ \t]*\[profile:/ { p = ($0 != skip); if (p) print; next }
+    /^[ \t]*\[/        { p = 0; next }
+    p                  { print }
+  ' "$CONFIG_FILE")"
+fi
 
 # Im nicht-interaktiven Modus (GUI) müssen die Pflicht-Flags gesetzt sein,
 # sonst würde das Skript auf eine Terminal-Eingabe warten und ewig hängen.
@@ -312,6 +338,7 @@ media = $MEDIA
 extra_options =
 
 [crop]
+profile = $PROFILE
 side = $CROP_SIDE
 trim_top_mm = $TRIM_TOP
 trim_bottom_mm = $TRIM_BOTTOM
@@ -330,6 +357,27 @@ processed_dirname = gedruckt
 poll_seconds = 2.0
 process_existing = false
 EOF
+
+# Aktives Profil als Sektion mitspeichern (Standard = Werks-Kalibrierung),
+# damit die GUI es anzeigen/wechseln kann; leer = kein Profil.
+if [ -n "$PROFILE" ]; then
+cat >> "$CONFIG_FILE" <<EOF
+
+[profile:$PROFILE]
+side = $CROP_SIDE
+trim_top_mm = $TRIM_TOP
+trim_bottom_mm = $TRIM_BOTTOM
+trim_left_mm = $TRIM_LEFT
+trim_right_mm = $TRIM_RIGHT
+target_size_mm = $TARGET
+rotate = auto
+EOF
+fi
+
+# Früher angelegte Profile wieder anhängen (bleiben bei jedem Setup erhalten)
+if [ -n "$OLD_PROFILES" ]; then
+  printf '\n%s\n' "$OLD_PROFILES" >> "$CONFIG_FILE"
+fi
 
 # ---------------------------------------------------------------- Desktop-Icons
 cat > "$DESKTOP_DIR/dhl-label-print.desktop" <<EOF

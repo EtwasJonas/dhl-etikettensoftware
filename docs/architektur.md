@@ -5,15 +5,15 @@
 | Datei | Rolle |
 |---|---|
 | `dhl_label.py` | Kern-CLI: `watch` `print` `print-latest` `crop` `calibrate` `show-config` `printers` `print-pdf`. Crop/Dreh/Skalier-Logik (pypdf), lp-Druck, Watcher-Loop. **Kein** GUI-Code. |
-| `gui_helpers.py` | Pure Logik ohne GTK (Windows-testbar): `list_printers`, `media_sizes`, `parse_size_mm`, `parse_trim_mm`, `build_install_cmd`, `calibration_variants`, `build_crop_cmd`, `build_print_cmd`, `check_environment`, `write_config_file`, `read_installed_config`, `installed_state` (Erkennung bestehender Installation für die GUI). |
+| `gui_helpers.py` | Pure Logik ohne GTK (Windows-testbar): `list_printers`, `media_sizes`, `parse_size_mm`, `parse_trim_mm`, `build_install_cmd`, `calibration_variants`, `build_crop_cmd`, `build_print_cmd`, `check_environment`, `write_config_file`, `read_installed_config`, `installed_state`, Profil-Logik (`read_profiles`, `resolve_startup_values`, `set_active_profile`, `upsert_profile`, `delete_profile`, `normalize_profile_values`, `profile_values_equal`, `factory_profile_values`, `valid_profile_name`). |
 | `icon.png` | Fenster-/Desktop-Icon der GUI und der Desktop-Einträge. |
 | `setup_gui.py` | GTK3-Setup-Assistent (Formular → install.sh-Flags → Log-Streaming → Erfolg → GUI-Kalibrierdialog; Installations-Erkennung mit Vorbefüllung, Deinstallieren-Knopf). Zuschnitt-Felder (mm oben/unten/links/rechts) im Formular und im Kalibrier-Dialog inkl. „Werte speichern“ (schreibt config.conf via `write_config_file` + `systemctl --user restart dhl-label` – Feintuning ohne Installer-Lauf). Läuft mit **System-Python** (`/usr/bin/python3`), nicht im venv (GTK liegt im System, pypdf im venv). |
 | `setup-gui.sh` | Doppelklick-Launcher für die GUI (`exec /usr/bin/python3 "$(dirname "$0")/setup_gui.py"`); braucht einmalig exec-Bit nach ZIP-Entpacken. |
-| `install.sh` | Installer, zwei Modi: interaktiv (kein Argument, Terminal-Fallback) und nicht-interaktiv per Flags (GUI ruft auf): `--printer --media --target --trim-top --trim-bottom --trim-left --trim-right --watch-mode downloads|custom --watch-dir --pattern --side top|bottom --no-calibrate --pkexec --non-interactive`. Im Nicht-interaktiv-Modus Pflicht-Flags validieren (sonst würde read hängen); Zuschnitt-Werte werden (in beiden Modi) normalisiert (Komma→Punkt, leer=0) und gegen Zahlen-Regex geprüft, bevor installiert wird. |
+| `install.sh` | Installer, zwei Modi: interaktiv (kein Argument, Terminal-Fallback) und nicht-interaktiv per Flags (GUI ruft auf): `--printer --media --target --trim-top --trim-bottom --trim-left --trim-right --profile --watch-mode downloads|custom --watch-dir --pattern --side top|bottom --no-calibrate --pkexec --non-interactive`. Im Nicht-interaktiv-Modus Pflicht-Flags validieren (sonst würde read hängen); Zuschnitt-Werte werden (in beiden Modi) normalisiert (Komma→Punkt, leer=0) und gegen Zahlen-Regex geprüft, bevor installiert wird. `--profile` (Default: aktives Profil der alten Config, sonst „Standard“) setzt `[crop] profile`, schreibt die aktive `[profile:NAME]`-Sektion frisch und bewahrt alle anderen `[profile:*]`-Sektionen (Erneut-Installieren verliert keine Profile). |
 | `uninstall.sh` | Entfernt Service, Dateien, Icons, Config. Wird von install.sh zusätzlich nach APP_DIR kopiert (GUI kann aus installierter Kopie deinstallieren). |
 | `dhl-label.service` | systemd-User-Unit, `ExecStart=%h/.local/bin/dhl-label watch`, `Restart=on-failure`, `WantedBy=default.target`. |
 | `win_backend.py` | Windows-Backend: GDI-Druckpfad (pypdfium2 + Pillow + win32print/win32ui), Drucker-/Papierformate, Autostart-Verknüpfung, Watcher-Lock, Log-Datei. Top-Level nur Stdlib (auch unter Linux importierbar). |
-| `setup_gui_win.py` | Windows-Setup-Assistent (tkinter): Formular → config.conf direkt schreiben → Autostart-Verknüpfung → Manueller Druck (gespeicherte Einstellungen, inkl. fehlgeschlagen/-Fallback) → Watcher-Knopf mit Live-Status (3-s-Refresh). |
+| `setup_gui_win.py` | Windows-Setup-Assistent (tkinter): Formular → config.conf direkt schreiben → Autostart-Verknüpfung → Manueller Druck (gespeicherte Einstellungen, inkl. fehlgeschlagen/-Fallback) → Watcher-Knopf mit Live-Status (3-s-Refresh). Profil-Auswahl („Standard“ = Werks-Kalibrierung, eigene Profile anlegen/wechseln/löschen); Legacy-Configs mit 0-Zuschnitt bekommen die Werks-Werte vorausgefüllt (`resolve_startup_values`). |
 | `dhl-label-win.spec` | PyInstaller-Spec → `dist/dhl-label.exe` (onefile, windowed, icon.ico). |
 | `defaults.conf` | Werks-Kalibrierung (verifiziert am SN 420B): side/trims/target_size_mm/rotate. Werden von allen Setups als Vorbefüllung gelesen (Windows-GUI, GTK-GUI, install.sh); EXE bündelt die Datei. Bestehende config.conf bleiben unangetastet. |
 | `.github/workflows/windows-build.yml` | CI: Tests (Linux+Windows), EXE-Build, Release-Anhang bei Tag `v*`. |
@@ -40,6 +40,7 @@ media = <CUPS-Mediengröße, z.B. 4x6>
 extra_options =            # zusätzliche lp-Optionen (shlex-split)
 
 [crop]
+profile = Standard         # aktives Profil (leer = keins; optional)
 side = top                 # top | bottom | full
 trim_top_mm = 0.0
 trim_bottom_mm = 0.0
@@ -57,7 +58,29 @@ filename_pattern = versand|dhl|paket
 processed_dirname = gedruckt
 poll_seconds = 2.0
 process_existing = false
+
+[profile:Standard]         # Profil-Sektionen (seit v1.3): gespeicherte
+side = top                 # Kalibrier-Sätze. „Standard“ enthält die Werks-
+trim_top_mm = 16.24        # Kalibrierung (defaults.conf) und ist immer
+trim_bottom_mm = 16.66     # vorhanden; je Profil eine Sektion [profile:NAME].
+trim_left_mm = 3.08
+trim_right_mm = 4.13
+target_size_mm = 101.6x152.4
+rotate = auto
 ```
+
+**Profile (seit v1.3):** Profile sind gespeicherte Kalibrier-Sätze
+(Etikettengröße, Zuschnitt, Position, Rotation) als `[profile:NAME]`-Sektionen.
+Die **wirksamen** Werte bleiben `[crop]` – ein Profilwechsel (GUI oder CLI
+`dhl-label profiles NAME`) kopiert die Profil-Werte nach `[crop]` und setzt
+`profile = NAME`; der Dienst/Watcher übernimmt sie beim Neustart. Regeln:
+„Standard“ ist nicht löschbar; beim Speichern in der GUI wird das gewählte
+Profil mit den Formular-Werten synchronisiert; `install.sh` bewahrt fremde
+`[profile:*]`-Sektionen bei jedem (Erneut-)Installieren und schreibt die
+aktive frisch. GUI-Start: aktives Profil → Vorbefüllung; ohne Profil-Schlüssel
+gilt `resolve_startup_values` (Werte == Werks-Standard → Standard; alle
+Zuschnitte 0 → Werks-Werte vorausfüllen mit Migrations-Hinweis; sonst
+eigenen Werte ohne Profil-Auswahl).
 
 Parsing: `ConfigParser` + `SectionProxy`-Fallback (Fehlen von Sections ist OK,
 getestet). Env-Override für Tests: `DHL_LABEL_CONFIG`.
@@ -217,9 +240,9 @@ Schere weg, Uniform-Scale (Barcode scannbar), keine Verzerrung.
   GUI-interner 3-s-Timer (`_update_watcher_button`), pausiert bei `busy`.
 - **Diagnose:** Log-Zeilen tragen `[YYYY-MM-DD HH:MM:SS]` (Datei-Log in
   `dhl_label._append_log_file` und `win_backend.append_log_file`). Der
-  Watcher protokolliert beim Start die effektive Config (Drucker, Medium,
-  Zielgröße, Zuschnitte) und warnt laut, wenn der konfigurierte Drucker
-  in Windows nicht existiert (häufigste Ursache für
+  Watcher protokolliert beim Start die effektive Config (Profil, Drucker,
+  Medium, Zielgröße, Zuschnitte) und warnt laut, wenn der konfigurierte
+  Drucker in Windows nicht existiert (häufigste Ursache für
   fehlgeschlagen/-Landungen nach Config-Kopierverschieben).
 - **Retry-Pause:** nach einem Druckfehler wartet der Watcher 10 s
   (`RETRY_DELAY`), bevor der nächste Versuch startet (früher: nächster
