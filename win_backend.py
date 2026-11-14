@@ -64,28 +64,6 @@ def log_file():
     return app_data_dir() / "dhl-label.log"
 
 
-def smart_app_control_state():
-    """Smart App Control (Windows 11) aus der Registry lesen.
-    → 'aus' (0) | 'aktiv' (1, blockiert unsignierte Apps) | 'pruefung'
-    (2, Evaluation) | None (nicht lesbar / Feature nicht vorhanden).
-
-    Hintergrund: SAC hat KEINE Einzelausnahme für Apps – unsignierte EXEs
-    werden blockiert; der Nutzer kann nur SAC ausschalten oder die App muss
-    mit gültigem Zertifikat signiert sein."""
-    if os.name != "nt":
-        return None
-    try:
-        import winreg
-
-        with winreg.OpenKey(
-                winreg.HKEY_LOCAL_MACHINE,
-                r"SYSTEM\CurrentControlSet\Control\CI\Policy") as key:
-            value, _typ = winreg.QueryValueEx(key, "VerifiedAndReputablePolicyState")
-        return {0: "aus", 1: "aktiv", 2: "pruefung"}.get(int(value))
-    except (OSError, ValueError):
-        return None
-
-
 def startup_dir():
     base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
     return Path(base) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"

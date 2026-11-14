@@ -67,16 +67,6 @@ class SetupWindow:
             self._log("Voraussetzungen fehlen:")
             for problem in problems:
                 self._log("  - " + problem)
-        sac = win_backend.smart_app_control_state()
-        if sac in ("aktiv", "pruefung"):
-            self._log(
-                "ACHTUNG: Windows Smart App Control ist "
-                + ("AKTIV (blockiert unsignierte Apps)" if sac == "aktiv"
-                   else "im Prüfungs-Modus") + ".\n"
-                "  Diese EXE ist nicht signiert – es gibt dafür KEINE Ausnahme;\n"
-                "  gerade nach einem Update kann die frisch geladene EXE blockiert werden.\n"
-                "  Lösung: Windows-Sicherheit → App- und Browsersteuerung →\n"
-                "  „Smart App Control-Einstellungen“ → „Aus“ (Details: README, Fehlersuche).")
         self.refresh_state()
         self.load_printers_async()
         self._update_watcher_button()

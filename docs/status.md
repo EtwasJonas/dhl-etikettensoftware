@@ -139,22 +139,6 @@
   (1).exe“** – Prozessname ändert sich durch das „ (1)“, `Get-Process
   dhl-label` findet ihn nicht (immer `dhl-label*` suchen).
 
-### Smart App Control (14.11.2026)
-
-- **Nutzer-Feedback:** SAC blockiert die EXE am Zweit-PC. Fakten laut
-  Microsoft-Doku (12.11. recherchiert): SAC hat **keine Einzelausnahme**
-  („There is currently no way to bypass Smart App Control for individual
-  apps“), lässt nur cloud-als-sicher-eingestufte ODER gültig signierte
-  Programme laufen; Selbstsignieren zählt wie unsigniert. Eine echte Signatur
-  ist ohne Zertifikat (Identitätsprüfung + laufende Kosten; Azure Artifact
-  Signing ~10 $/Monat, für Einzelpersonen nur USA/Canada) nicht möglich →
-  **Nutzer schaltet SAC aus** (seit 24H2/25H2 jederzeit wieder einschaltbar).
-- **Umgesetzt:** `win_backend.smart_app_control_state()` (Registry
-  `VerifiedAndReputablePolicyState`: 0=aus/1=aktiv/2=Prüfung) + Hinweis im
-  GUI-Protokoll beim Start, wenn SAC aktiv/Prüfung ist (nur Log, kein
-  Modal-Dialog); README-Fehlersuche mit Aus-Lösung + Signatur-Fakten.
-  Wirkungsvoll erst mit dem nächsten Release (EXE neu gebaut).
-
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
 - **Release v1.2.0 ist live** (12.11.2026, defaults.conf/Werks-Kalibrierung).

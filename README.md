@@ -315,19 +315,6 @@ Windows:
 dhl-label.exe printers                   # Druckerliste + Papierformate
 ```
 
-- **Smart App Control blockiert die EXE beim Start** (neue Windows-11-PCs,
-  meist direkt nach der Einrichtung): Diese Sicherheitsfunktion hat **keine
-  Ausnahme für einzelne Apps** – sie lässt nur Programme laufen, die Windows
-  als sicher einstuft oder die mit einem gültigen Zertifikat signiert sind.
-  Diese EXE ist nicht signiert. Lösung: Smart App Control ausschalten –
-  **Windows-Sicherheit → App- und Browsersteuerung → „Smart App
-  Control-Einstellungen“ → „Aus“** (mit JA bestätigen). Danach greift
-  wieder der normale SmartScreen-Hinweis („Weitere Informationen“ →
-  „Trotzdem ausführen“). Seit Windows 11 24H2/25H2 lässt sich Smart App
-  Control später jederzeit wieder einschalten; auf älteren Builds erst per
-  PC-Reset. (Ein selbst signiertes Programm würde hier übrigens nichts
-  ändern – dafür bräuchte es ein echtes Code-Signing-Zertifikat mit
-  Identitätsprüfung und laufenden Kosten.)
 - **PDF landet in `fehlgeschlagen/`?** Die Zeilen mit Zeitstempel im Log
   verraten den Grund, z.B.:
   - „Der konfigurierte Drucker ‚X' ist in Windows nicht (mehr)
