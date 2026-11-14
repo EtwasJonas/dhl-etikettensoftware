@@ -197,13 +197,12 @@ Zuschnitte 0) bleibt laut Design unangetastet und die GUI zeigte deren Werte.
 
 ## Nächster Schritt / offene Punkte (Einstieg für die neue Sitzung)
 
-- **Release v1.3.0 taggen** (Profil-Feature + Zweit-PC-Migration): `git tag
-  v1.3.0 && git push origin v1.3.0` – CI baut + hängt die EXE automatisch an
-  (contents:write). Nutzer installiert die EXE vom Release → GUI zeigt auf
-  dem Zweit-PC die Werks-Werte vorausgefüllt; einmal „Einstellungen
-  aktualisieren“ klicken (oder Profil „Standard“ wählen), danach Watcher-Neustart.
+- **Release v1.3.0 ist live** (14.11.2026: Profile + Zweit-PC-Migration, EXE am
+  Release, Release-Notes geschrieben) → Nutzer installiert die EXE vom Release;
+  auf dem Zweit-PC zeigt die GUI die Werks-Werte vorausgefüllt – einmal
+  „Einstellungen aktualisieren“ klicken, danach Watcher-Neustart.
 - **Release v1.2.0 ist live** (12.11.2026, defaults.conf/Werks-Kalibrierung)
-  – wird durch v1.3.0 oben abgelöst.
+  – wird durch v1.3.0 abgelöst.
 - **Watcher-Fehler am Zweit-PC ungeklärt**: Nutzer-Test dort – GUI-Testdruck
   ok, aber PDFs landeten direkt in `fehlgeschlagen/`. Auf dem Dev-PC keine
   Spur (keine DHL-PDFs/Ordner heute). Mit dem neuen Build ist die Ursache
